@@ -1,8 +1,8 @@
 <p align="center">
-    <img src="imgs/mcp_logo.png" alt="mcp_logo" style="width: 15%;" />
-    <img src="imgs/plus.svg" alt="plus_svg" style="width: 10%;" />
-    <img src="imgs/rust_logo.png" alt="rust_logo" style="width: 15%;" />
-</div>
+    <img src="imgs/mcp_logo.png" alt="mcp_logo" style="width: 15%; margin-right:3%;" />
+    <img src="imgs/plus.svg" alt="plus_svg" style="width: 10%; margin-bottom: 2%;" />
+    <img src="imgs/rust_logo.png" alt="rust_logo" style="width: 15%; margin-left:3%;" />
+</p>
 <p align="center">
 <h1 align="center">MCP Core</h1>
 <p align="center">
