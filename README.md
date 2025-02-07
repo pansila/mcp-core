@@ -1,4 +1,4 @@
-<div style="display: flex; justify-content: center; align-items: center; width: 100%; gap: 5%;">
+<p align="center">
     <img src="imgs/mcp_logo.png" alt="mcp_logo" style="width: 15%;" />
     <img src="imgs/plus.svg" alt="plus_svg" style="width: 10%;" />
     <img src="imgs/rust_logo.png" alt="rust_logo" style="width: 15%;" />
