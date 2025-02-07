@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     sync::{
@@ -13,16 +12,12 @@ use tokio::time;
 
 use crate::{
     error::McpError,
-    logging::LoggingCapabilities,
-    prompts::{
-        GetPromptRequest, ListPromptsRequest, ListPromptsResponse, PromptCapabilities, PromptResult,
-    },
-    protocol::{JsonRpcNotification, Protocol, ProtocolHandle, ProtocolOptions},
+    prompts::{GetPromptRequest, ListPromptsRequest, ListPromptsResponse, PromptResult},
+    protocol::{Protocol, ProtocolHandle, ProtocolOptions},
     resource::{
         ListResourcesRequest, ListResourcesResponse, ReadResourceRequest, ReadResourceResponse,
-        ResourceCapabilities,
     },
-    tools::{CallToolRequest, ListToolsRequest, ListToolsResponse, ToolCapabilities, ToolResult},
+    tools::{CallToolRequest, ListToolsRequest, ListToolsResponse, ToolResult},
     transport::{Transport, TransportCommand},
 };
 
@@ -31,7 +26,7 @@ use super::{
         ClientCapabilities, ClientInfo, InitializeParams, InitializeResult, RootsCapabilities,
         SamplingCapabilities, ServerCapabilities,
     },
-    ClientTrait,
+    Client,
 };
 
 pub struct BasicClient {
@@ -53,95 +48,10 @@ impl BasicClient {
             server_capabilities: Arc::new(RwLock::new(None)),
         }
     }
-
-    /// Ensure that the client is initialized.
-    async fn assert_initialized(&self) -> Result<(), McpError> {
-        if !*self.initialized.read().await {
-            return Err(McpError::InvalidRequest(
-                "Client not initialized".to_string(),
-            ));
-        }
-        Ok(())
-    }
-
-    /// Ensure that the server has advertised a given capability.
-    async fn assert_capability(&self, capability: &str) -> Result<(), McpError> {
-        let caps = self.server_capabilities.read().await;
-        let caps = caps
-            .as_ref()
-            .ok_or_else(|| McpError::InvalidRequest("No server capabilities".to_string()))?;
-        let has_capability = match capability {
-            "logging" => caps.logging.is_some(),
-            "prompts" => caps.prompts.is_some(),
-            "resources" => caps.resources.is_some(),
-            "tools" => caps.tools.is_some(),
-            _ => false,
-        };
-        if !has_capability {
-            return Err(McpError::CapabilityNotSupported(capability.to_string()));
-        }
-        Ok(())
-    }
-
-    /// Clean up internal resources (handlers, transports, etc.).
-    async fn cleanup_resources(&mut self) -> Result<(), McpError> {
-        tracing::debug!("Cleaning up client resources");
-        if let Some(cmd_tx) = &self.protocol.cmd_tx {
-            let _ = cmd_tx.send(TransportCommand::Close).await;
-            self.protocol.cmd_tx = None;
-        }
-        self.protocol.notification_handlers.write().await.clear();
-        self.protocol.request_handlers.write().await.clear();
-        self.protocol.response_handlers.write().await.clear();
-        self.protocol.progress_handlers.write().await.clear();
-        *self.server_capabilities.write().await = None;
-        Ok(())
-    }
-
-    /// Wait for the server to acknowledge a shutdown notification.
-    async fn wait_for_shutdown(&mut self) -> Result<(), McpError> {
-        let shutdown_ack = Arc::new(AtomicBool::new(false));
-        {
-            let mut handlers = self.protocol.notification_handlers.write().await;
-            let ack = shutdown_ack.clone();
-            handlers.insert(
-                "shutdown/ack".to_string(),
-                Box::new(move |_notification| {
-                    let ack = ack.clone();
-                    Box::pin(async move {
-                        ack.store(true, Ordering::SeqCst);
-                        Ok(())
-                    })
-                }),
-            );
-        }
-        self.protocol.notification("shutdown", None::<()>).await?;
-        let mut attempts = 0;
-        while !shutdown_ack.load(Ordering::SeqCst) {
-            if attempts >= 50 {
-                return Err(McpError::ShutdownError(
-                    "No shutdown acknowledgment received".into(),
-                ));
-            }
-            time::sleep(Duration::from_millis(100)).await;
-            attempts += 1;
-        }
-        self.protocol
-            .notification_handlers
-            .write()
-            .await
-            .remove("shutdown/ack");
-        self.cleanup_resources().await?;
-        Ok(())
-    }
 }
 
-//
-// --- Implementation of ClientTrait for BasicClient ---
-//
-
 #[async_trait]
-impl ClientTrait for BasicClient {
+impl Client for BasicClient {
     async fn connect<T: Transport + Send + Sync + 'static>(
         &mut self,
         transport: T,
@@ -316,5 +226,86 @@ impl ClientTrait for BasicClient {
 
     async fn has_client_info(&self) -> bool {
         self.get_client_info().await.is_some()
+    }
+
+    /// Ensure that the client is initialized.
+    async fn assert_initialized(&self) -> Result<(), McpError> {
+        if !*self.initialized.read().await {
+            return Err(McpError::InvalidRequest(
+                "Client not initialized".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Ensure that the server has advertised a given capability.
+    async fn assert_capability(&self, capability: &str) -> Result<(), McpError> {
+        let caps = self.server_capabilities.read().await;
+        let caps = caps
+            .as_ref()
+            .ok_or_else(|| McpError::InvalidRequest("No server capabilities".to_string()))?;
+        let has_capability = match capability {
+            "logging" => caps.logging.is_some(),
+            "prompts" => caps.prompts.is_some(),
+            "resources" => caps.resources.is_some(),
+            "tools" => caps.tools.is_some(),
+            _ => false,
+        };
+        if !has_capability {
+            return Err(McpError::CapabilityNotSupported(capability.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Clean up internal resources (handlers, transports, etc.).
+    async fn cleanup_resources(&mut self) -> Result<(), McpError> {
+        tracing::debug!("Cleaning up client resources");
+        if let Some(cmd_tx) = &self.protocol.cmd_tx {
+            let _ = cmd_tx.send(TransportCommand::Close).await;
+            self.protocol.cmd_tx = None;
+        }
+        self.protocol.notification_handlers.write().await.clear();
+        self.protocol.request_handlers.write().await.clear();
+        self.protocol.response_handlers.write().await.clear();
+        self.protocol.progress_handlers.write().await.clear();
+        *self.server_capabilities.write().await = None;
+        Ok(())
+    }
+
+    /// Wait for the server to acknowledge a shutdown notification.
+    async fn wait_for_shutdown(&mut self) -> Result<(), McpError> {
+        let shutdown_ack = Arc::new(AtomicBool::new(false));
+        {
+            let mut handlers = self.protocol.notification_handlers.write().await;
+            let ack = shutdown_ack.clone();
+            handlers.insert(
+                "shutdown/ack".to_string(),
+                Box::new(move |_notification| {
+                    let ack = ack.clone();
+                    Box::pin(async move {
+                        ack.store(true, Ordering::SeqCst);
+                        Ok(())
+                    })
+                }),
+            );
+        }
+        self.protocol.notification("shutdown", None::<()>).await?;
+        let mut attempts = 0;
+        while !shutdown_ack.load(Ordering::SeqCst) {
+            if attempts >= 50 {
+                return Err(McpError::ShutdownError(
+                    "No shutdown acknowledgment received".into(),
+                ));
+            }
+            time::sleep(Duration::from_millis(100)).await;
+            attempts += 1;
+        }
+        self.protocol
+            .notification_handlers
+            .write()
+            .await
+            .remove("shutdown/ack");
+        self.cleanup_resources().await?;
+        Ok(())
     }
 }

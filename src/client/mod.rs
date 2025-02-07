@@ -1,4 +1,5 @@
 pub mod basic;
+pub mod secure;
 pub mod types;
 
 use crate::{
@@ -13,9 +14,8 @@ use serde_json::Value;
 
 use types::{ClientInfo, InitializeResult, ServerCapabilities};
 
-/// A dynamic client trait (object-safe) that defines the MCP client API.
 #[async_trait]
-pub trait ClientTrait: Send + Sync {
+pub trait Client: Send + Sync {
     async fn connect<T: crate::transport::Transport + Send + Sync + 'static>(
         &mut self,
         transport: T,
@@ -55,4 +55,12 @@ pub trait ClientTrait: Send + Sync {
     async fn get_client_info(&self) -> Option<ClientInfo>;
 
     async fn has_client_info(&self) -> bool;
+
+    async fn assert_initialized(&self) -> Result<(), McpError>;
+
+    async fn assert_capability(&self, capability: &str) -> Result<(), McpError>;
+
+    async fn cleanup_resources(&mut self) -> Result<(), McpError>;
+
+    async fn wait_for_shutdown(&mut self) -> Result<(), McpError>;
 }

@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use mcp_core::{
-    client::{basic::BasicClient, types::ClientInfo, ClientTrait},
+    client::{basic::BasicClient, types::ClientInfo, Client},
     error::McpError,
     transport::{sse::SseTransport, stdio::StdioTransport},
 };
