@@ -1,12 +1,10 @@
 use clap::{Parser, Subcommand};
 use mcp_core::{
-    client::{Client, ClientInfo},
+    client::{basic::BasicClient, types::ClientInfo, ClientTrait},
     error::McpError,
-    transport::sse::SseTransport,
-    transport::stdio::StdioTransport,
+    transport::{sse::SseTransport, stdio::StdioTransport},
 };
 use serde_json::json;
-use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 #[derive(Parser, Debug)]
 #[command(name = "mcp-client", version, about = "MCP Client CLI")]
@@ -82,7 +80,7 @@ async fn main() -> Result<(), McpError> {
     tracing_subscriber::fmt().init();
 
     // Create and initialize client
-    let mut client = Client::new();
+    let mut client = BasicClient::new();
 
     // Set up transport with better error handling
     match args.transport.as_str() {
@@ -158,9 +156,10 @@ async fn main() -> Result<(), McpError> {
             return Err(McpError::RequestTimeout);
         }
     };
+    tracing::info!("Initialize response: {:?}", init_result);
 
     // Execute command
-    let result = match args.command {
+    match args.command {
         Commands::ListResources { cursor } => {
             let res = client.list_resources(cursor).await?;
             println!("{}", json!(res));

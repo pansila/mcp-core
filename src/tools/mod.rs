@@ -9,7 +9,7 @@ pub mod calculator;
 pub mod file_system;
 pub mod test_tool;
 
-use crate::{client::Client, error::McpError};
+use crate::error::McpError;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

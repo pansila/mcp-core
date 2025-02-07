@@ -9,7 +9,7 @@ use tracing::info;
 use crate::prompts::{GetPromptRequest, ListPromptsRequest, PromptCapabilities, PromptManager};
 use crate::tools::{ToolCapabilities, ToolManager};
 use crate::{
-    client::ServerCapabilities,
+    client::types::ServerCapabilities,
     error::McpError,
     logging::{LoggingCapabilities, LoggingManager, SetLevelRequest},
     protocol::types::*,
