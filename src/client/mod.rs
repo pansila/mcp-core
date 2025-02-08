@@ -239,13 +239,26 @@ impl Client {
         self.assert_initialized().await?;
         self.assert_capability("tools").await?;
 
-        self.protocol
-            .request(
-                "tools/call",
-                Some(CallToolRequest { name, arguments }),
-                None,
-            )
-            .await
+        if self.env.is_some() {
+            let mut arguments_clone = arguments.clone();
+            self.apply_secure_replacements(&mut arguments_clone).await?;
+
+            self.protocol
+                .request(
+                    "tools/call",
+                    Some(CallToolRequest { name, arguments }),
+                    None,
+                )
+                .await
+        } else {
+            self.protocol
+                .request(
+                    "tools/call",
+                    Some(CallToolRequest { name, arguments }),
+                    None,
+                )
+                .await
+        }
     }
 
     // Logging methods
