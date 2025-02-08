@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use mcp_core::{
-    client::{basic::BasicClient, types::ClientInfo, Client},
+    client::{types::ClientInfo, Client},
     error::McpError,
     transport::{sse::SseTransport, stdio::StdioTransport},
 };
@@ -80,7 +80,7 @@ async fn main() -> Result<(), McpError> {
     tracing_subscriber::fmt().init();
 
     // Create and initialize client
-    let mut client = BasicClient::new();
+    let mut client = Client::new();
 
     // Set up transport with better error handling
     match args.transport.as_str() {
@@ -156,7 +156,8 @@ async fn main() -> Result<(), McpError> {
             return Err(McpError::RequestTimeout);
         }
     };
-    tracing::info!("Initialize response: {:?}", init_result);
+
+    tracing::debug!("Initialized: {:?}", init_result);
 
     // Execute command
     match args.command {

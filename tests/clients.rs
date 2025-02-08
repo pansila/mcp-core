@@ -1,11 +1,11 @@
 use mcp_core::{
-    client::secure::{SecureClientBuilder, SecureValue},
+    client::{ClientBuilder, SecureValue},
     error::McpError,
 };
 
 #[tokio::test]
-async fn test_secure_client() -> Result<(), McpError> {
-    let sec_client = SecureClientBuilder::new()
+async fn test_client_env() -> Result<(), McpError> {
+    let sec_client = ClientBuilder::new()
         .with_secure_value("test_key", SecureValue::Static("test_value".to_string()))
         .build();
 
