@@ -163,7 +163,7 @@ where
         Ok(())
     }
 
-    async fn run_transport<T: Transport>(&mut self, transport: T) -> Result<(), McpError> {
+    pub async fn run_transport<T: Transport>(&mut self, transport: T) -> Result<(), McpError> {
         // Take ownership of notification receiver
         let notification_rx = self.notification_rx.take().ok_or_else(|| {
             McpError::InternalError("Notification receiver already taken".to_string())
