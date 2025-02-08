@@ -12,7 +12,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast::Sender, mpsc, Mutex};
 use warp::Filter;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -21,217 +21,184 @@ struct EndpointEvent {
     endpoint: String,
 }
 
-pub struct SseTransport {
+pub struct ServerTransport {
     host: String,
     port: u16,
-    client_mode: bool,
+    public_url: Option<String>,
     buffer_size: usize,
 }
 
-impl SseTransport {
-    pub fn new_server(host: String, port: u16, buffer_size: usize) -> Self {
+impl ServerTransport {
+    pub fn new_local(host: String, port: u16, buffer_size: usize) -> Self {
         Self {
             host,
             port,
-            client_mode: false,
+            public_url: None,
             buffer_size,
         }
     }
 
-    pub fn new_client(host: String, port: u16, buffer_size: usize) -> Self {
+    pub fn new_public(host: String, port: u16, public_url: String, buffer_size: usize) -> Self {
         Self {
             host,
             port,
-            client_mode: true,
+            public_url: Some(public_url),
             buffer_size,
         }
     }
 
-    async fn run_server(
-        host: String,
-        port: u16,
-        mut cmd_rx: mpsc::Receiver<TransportCommand>,
-        event_tx: mpsc::Sender<TransportEvent>,
-    ) {
-        // Create broadcast channel for SSE clients
+    fn get_endpoint(&self) -> String {
+        match &self.public_url {
+            Some(url) => url.clone(),
+            None => format!("http://{}:{}", self.host, self.port),
+        }
+    }
+}
+
+#[async_trait]
+impl Transport for ServerTransport {
+    async fn start(&mut self) -> Result<TransportChannels, McpError> {
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(self.buffer_size);
+        let (event_tx, event_rx) = mpsc::channel(self.buffer_size);
         let (broadcast_tx, _) = tokio::sync::broadcast::channel::<JsonRpcMessage>(100);
         let broadcast_tx = Arc::new(broadcast_tx);
-        let broadcast_tx2 = Arc::clone(&broadcast_tx);
-
-        // Client counter for unique IDs
         let client_counter = Arc::new(AtomicU64::new(0));
-        let host_clone = host.clone();
 
-        // SSE endpoint route
-        let sse_route = warp::path("sse").and(warp::get()).map(move || {
-            let client_id = client_counter.fetch_add(1, Ordering::SeqCst);
-            let broadcast_rx = broadcast_tx.subscribe();
-            let endpoint = format!("http://{}:{}/message/{}", host.clone(), port, client_id);
+        let endpoint = Arc::new(self.get_endpoint());
 
-            warp::sse::reply(
-                warp::sse::keep_alive()
-                    .interval(Duration::from_secs(30))
-                    .stream(async_stream::stream! {
-                        yield Ok::<_, warp::Error>(warp::sse::Event::default()
-                            .event("endpoint")
-                            .data(endpoint));
+        let sse_route = warp::path("sse")
+            .and(warp::get())
+            .and(warp::any().map({
+                let broadcast_tx = broadcast_tx.clone();
+                let endpoint = endpoint.clone();
+                let client_counter = client_counter.clone();
+                move || {
+                    (
+                        broadcast_tx.clone(),
+                        endpoint.clone(),
+                        client_counter.clone(),
+                    )
+                }
+            }))
+            .and_then(
+                |(broadcast_tx, endpoint, client_counter): (
+                    Arc<Sender<JsonRpcMessage>>,
+                    Arc<String>,
+                    Arc<AtomicU64>,
+                )| async move {
+                    let client_id = client_counter.fetch_add(1, Ordering::SeqCst);
+                    let broadcast_rx = broadcast_tx.subscribe();
+                    let endpoint = format!("{}/message/{}", endpoint, client_id);
 
-                        let mut broadcast_rx = broadcast_rx;
-                        while let Ok(msg) = broadcast_rx.recv().await {
-                            yield Ok::<_, warp::Error>(warp::sse::Event::default()
-                                .event("message")
-                                .json_data(&msg)
-                                .unwrap());
-                        }
-                    }),
-            )
-        });
+                    Ok::<_, warp::Rejection>(warp::sse::reply(
+                        warp::sse::keep_alive()
+                            .interval(Duration::from_secs(30))
+                            .stream(async_stream::stream! {
+                                yield Ok::<_, warp::Error>(warp::sse::Event::default()
+                                    .event("endpoint")
+                                    .data(endpoint));
 
-        // Message receiving route
+                                let mut broadcast_rx = broadcast_rx;
+                                while let Ok(msg) = broadcast_rx.recv().await {
+                                    yield Ok::<_, warp::Error>(warp::sse::Event::default()
+                                        .event("message")
+                                        .json_data(&msg)
+                                        .unwrap());
+                                }
+                            }),
+                    ))
+                },
+            );
+
         let message_route = warp::path!("message" / u64)
             .and(warp::post())
             .and(warp::body::json())
-            .map(move |_client_id: u64, message: JsonRpcMessage| {
+            .map({
                 let event_tx = event_tx.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = event_tx.send(TransportEvent::Message(message)).await {
-                        tracing::error!("Failed to forward message: {:?}", e);
-                    }
-                });
-                warp::reply()
+                move |_client_id: u64, message: JsonRpcMessage| {
+                    let event_tx = event_tx.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = event_tx.send(TransportEvent::Message(message)).await {
+                            tracing::error!("Failed to forward message: {:?}", e);
+                        }
+                    });
+                    warp::reply()
+                }
             });
 
-        // Combine routes
         let routes = sse_route.or(message_route);
 
-        // Message forwarding task
-        tokio::spawn(async move {
-            while let Some(cmd) = cmd_rx.recv().await {
-                match cmd {
-                    TransportCommand::SendMessage(msg) => {
-                        // Skip broadcasting debug log messages about SSE and internal operations
-                        let should_skip = match &msg {
-                            JsonRpcMessage::Notification(n)
-                                if n.method == "notifications/message" =>
-                            {
-                                if let Some(params) = &n.params {
-                                    // Check the log message and logger
-                                    let is_debug = params
-                                        .get("level")
-                                        .and_then(|l| l.as_str())
-                                        .map_or(false, |l| l == "debug");
+        tokio::spawn({
+            let broadcast_tx = broadcast_tx.clone();
+            async move {
+                while let Some(cmd) = cmd_rx.recv().await {
+                    match cmd {
+                        TransportCommand::SendMessage(msg) => {
+                            let should_skip = match &msg {
+                                JsonRpcMessage::Notification(n)
+                                    if n.method == "notifications/message" =>
+                                {
+                                    if let Some(params) = &n.params {
+                                        let is_debug = params
+                                            .get("level")
+                                            .and_then(|l| l.as_str())
+                                            .map_or(false, |l| l == "debug");
 
-                                    let logger =
-                                        params.get("logger").and_then(|l| l.as_str()).unwrap_or("");
+                                        let logger = params
+                                            .get("logger")
+                                            .and_then(|l| l.as_str())
+                                            .unwrap_or("");
 
-                                    let message = params
-                                        .get("data")
-                                        .and_then(|d| d.get("message"))
-                                        .and_then(|m| m.as_str())
-                                        .unwrap_or("");
+                                        let message = params
+                                            .get("data")
+                                            .and_then(|d| d.get("message"))
+                                            .and_then(|m| m.as_str())
+                                            .unwrap_or("");
 
-                                    is_debug
-                                        && (logger.starts_with("hyper::")
-                                            || logger.starts_with("mcp_core::transport")
-                                            || message.contains("Broadcasting SSE message")
-                                            || message.contains("Failed to broadcast message"))
-                                } else {
-                                    false
+                                        is_debug
+                                            && (logger.starts_with("hyper::")
+                                                || logger.starts_with("mcp_core::transport")
+                                                || message.contains("Broadcasting SSE message")
+                                                || message.contains("Failed to broadcast message"))
+                                    } else {
+                                        false
+                                    }
+                                }
+                                _ => false,
+                            };
+
+                            if !should_skip {
+                                tracing::debug!("Broadcasting SSE message: {:?}", msg);
+                                if let Err(e) = broadcast_tx.clone().send(msg) {
+                                    tracing::error!("Failed to broadcast message: {:?}", e);
                                 }
                             }
-                            _ => false,
-                        };
-
-                        if !should_skip {
-                            tracing::debug!("Broadcasting SSE message: {:?}", msg);
-                            if let Err(e) = broadcast_tx2.send(msg) {
-                                tracing::error!("Failed to broadcast message: {:?}", e);
-                            }
                         }
+                        TransportCommand::Close => break,
                     }
-                    TransportCommand::Close => break,
                 }
             }
         });
 
-        // Start the server
-        warp::serve(routes)
-            .run((host_clone.parse::<IpAddr>().unwrap(), port))
-            .await;
+        tokio::spawn(warp::serve(routes).run((self.host.parse::<IpAddr>().unwrap(), self.port)));
+
+        let event_rx = Arc::new(Mutex::new(event_rx));
+
+        Ok(TransportChannels { cmd_tx, event_rx })
     }
+}
 
-    async fn run_client(
-        host: String,
-        port: u16,
-        mut cmd_rx: mpsc::Receiver<TransportCommand>,
-        event_tx: mpsc::Sender<TransportEvent>,
-    ) {
-        let client = reqwest::Client::new();
-        let sse_url = format!("http://{}:{}/sse", host, port);
+pub struct ClientTransport {
+    endpoint: String,
+    buffer_size: usize,
+}
 
-        tracing::debug!("Connecting to SSE endpoint: {}", sse_url);
-
-        let rb = client.get(&sse_url);
-        let mut sse = match EventSource::new(rb) {
-            Ok(es) => es,
-            Err(e) => {
-                tracing::error!("Failed to create EventSource: {:?}", e);
-                let _ = event_tx
-                    .send(TransportEvent::Error(McpError::ConnectionClosed))
-                    .await;
-                return;
-            }
-        };
-
-        // Wait for endpoint event
-        let endpoint = match Self::wait_for_endpoint(&mut sse).await {
-            Some(ep) => ep,
-            None => {
-                tracing::error!("Failed to receive endpoint");
-                let _ = event_tx
-                    .send(TransportEvent::Error(McpError::ConnectionClosed))
-                    .await;
-                return;
-            }
-        };
-
-        tracing::debug!("Received message endpoint: {}", endpoint);
-
-        // Message receiving task
-        let event_tx2 = event_tx.clone();
-        tokio::spawn(async move {
-            while let Ok(Some(event)) = sse.try_next().await {
-                match event {
-                    Event::Message(m) if m.event == "message" => {
-                        match serde_json::from_str::<JsonRpcMessage>(&m.data) {
-                            Ok(msg) => {
-                                if let Err(e) = event_tx2.send(TransportEvent::Message(msg)).await {
-                                    tracing::error!("Failed to forward SSE message: {:?}", e);
-                                    break;
-                                }
-                            }
-                            Err(e) => tracing::error!("Failed to parse SSE message: {:?}", e),
-                        }
-                    }
-                    _ => continue,
-                }
-            }
-        });
-
-        // Message sending task
-        while let Some(cmd) = cmd_rx.recv().await {
-            match cmd {
-                TransportCommand::SendMessage(msg) => {
-                    tracing::debug!("Sending message to {}: {:?}", endpoint, msg);
-                    if let Err(e) = client.post(&endpoint).json(&msg).send().await {
-                        tracing::error!("Failed to send message: {:?}", e);
-                    }
-                }
-                TransportCommand::Close => break,
-            }
+impl ClientTransport {
+    pub fn new(endpoint: String, buffer_size: usize) -> Self {
+        Self {
+            endpoint,
+            buffer_size,
         }
-
-        let _ = event_tx.send(TransportEvent::Closed).await;
     }
 
     async fn wait_for_endpoint(sse: &mut EventSource) -> Option<String> {
@@ -247,29 +214,94 @@ impl SseTransport {
 }
 
 #[async_trait]
-impl Transport for SseTransport {
+impl Transport for ClientTransport {
     async fn start(&mut self) -> Result<TransportChannels, McpError> {
-        let (cmd_tx, cmd_rx) = mpsc::channel(self.buffer_size);
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(self.buffer_size);
         let (event_tx, event_rx) = mpsc::channel(self.buffer_size);
 
-        if self.client_mode {
-            tokio::spawn(Self::run_client(
-                self.host.clone(),
-                self.port,
-                cmd_rx,
-                event_tx,
-            ));
-        } else {
-            tokio::spawn(Self::run_server(
-                self.host.clone(),
-                self.port,
-                cmd_rx,
-                event_tx,
-            ));
-        }
+        let endpoint = self.endpoint.clone();
 
-        let event_rx = Arc::new(tokio::sync::Mutex::new(event_rx));
+        tokio::spawn({
+            let endpoint = endpoint.clone();
+            let event_tx = event_tx.clone();
+            async move {
+                let client = reqwest::Client::new();
+                let sse_url = format!("{}/sse", endpoint);
+                tracing::debug!("Connecting to SSE endpoint: {}", sse_url);
 
+                let rb = client.get(&sse_url);
+                let mut sse = match EventSource::new(rb) {
+                    Ok(es) => es,
+                    Err(e) => {
+                        tracing::error!("Failed to create EventSource: {:?}", e);
+                        let _ = event_tx
+                            .send(TransportEvent::Error(McpError::ConnectionClosed))
+                            .await;
+                        return;
+                    }
+                };
+
+                // Wait for the endpoint event.
+                let endpoint = match Self::wait_for_endpoint(&mut sse).await {
+                    Some(ep) => ep,
+                    None => {
+                        tracing::error!("Failed to receive endpoint");
+                        let _ = event_tx
+                            .send(TransportEvent::Error(McpError::ConnectionClosed))
+                            .await;
+                        return;
+                    }
+                };
+
+                println!("Connected to server using SSE transport: {}", endpoint);
+                tracing::debug!("Received message endpoint: {}", endpoint);
+
+                // Spawn a task to receive messages from the EventSource.
+                let event_tx2 = event_tx.clone();
+                tokio::spawn(async move {
+                    while let Ok(Some(event)) = sse.try_next().await {
+                        match event {
+                            Event::Message(m) if m.event == "message" => {
+                                match serde_json::from_str::<JsonRpcMessage>(&m.data) {
+                                    Ok(msg) => {
+                                        if let Err(e) =
+                                            event_tx2.send(TransportEvent::Message(msg)).await
+                                        {
+                                            tracing::error!(
+                                                "Failed to forward SSE message: {:?}",
+                                                e
+                                            );
+                                            break;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("Failed to parse SSE message: {:?}", e);
+                                    }
+                                }
+                            }
+                            _ => continue,
+                        }
+                    }
+                });
+
+                // Process outgoing messages.
+                while let Some(cmd) = cmd_rx.recv().await {
+                    match cmd {
+                        TransportCommand::SendMessage(msg) => {
+                            tracing::debug!("Sending message to {}: {:?}", endpoint, msg);
+                            if let Err(e) = client.post(&endpoint).json(&msg).send().await {
+                                tracing::error!("Failed to send message: {:?}", e);
+                            }
+                        }
+                        TransportCommand::Close => break,
+                    }
+                }
+
+                let _ = event_tx.send(TransportEvent::Closed).await;
+            }
+        });
+
+        let event_rx = Arc::new(Mutex::new(event_rx));
         Ok(TransportChannels { cmd_tx, event_rx })
     }
 }

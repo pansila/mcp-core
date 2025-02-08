@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use mcp_core::{
     client::{types::ClientInfo, Client},
     error::McpError,
-    transport::{sse::SseTransport, stdio::StdioTransport},
+    transport::{stdio::StdioTransport, SseClientTransport},
 };
 use serde_json::json;
 
@@ -116,14 +116,15 @@ async fn main() -> Result<(), McpError> {
             }
         }
         "sse" => {
-            let server_url = args.server.unwrap_or("http://127.0.0.1".to_string());
-            // Parse server URL to get host and port
-            let url = url::Url::parse(&server_url).unwrap();
-            let host = url.host_str().unwrap_or("127.0.0.1").to_string();
-            let port = url.port().unwrap_or(3000);
-
-            let transport = SseTransport::new_client(host, port, 32);
-            client.connect(transport).await?;
+            if let Some(server_url) = args.server {
+                println!("Connecting using SSE transport: {}", server_url);
+                let transport = SseClientTransport::new(server_url, 32);
+                client.connect(transport).await?;
+            } else {
+                return Err(McpError::InvalidRequest(
+                    "Server URL is required for SSE transport".to_string(),
+                ));
+            }
         }
         _ => {
             return Err(McpError::InvalidRequest(

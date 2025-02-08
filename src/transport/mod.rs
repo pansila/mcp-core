@@ -7,6 +7,9 @@ use crate::{
     protocol::types::*, // Import all JSON-RPC types from protocol
 };
 
+pub use sse::ClientTransport as SseClientTransport;
+pub use sse::ServerTransport as SseServerTransport;
+
 // Message types for the transport actor
 #[derive(Debug)]
 pub enum TransportCommand {

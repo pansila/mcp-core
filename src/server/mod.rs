@@ -19,7 +19,7 @@ use crate::{
     },
     resource::{ListResourcesRequest, ReadResourceRequest, ResourceCapabilities, ResourceManager},
     tools::{CallToolRequest, ListToolsRequest},
-    transport::{sse::SseTransport, stdio::StdioTransport, Transport},
+    transport::{stdio::StdioTransport, SseServerTransport, Transport},
 };
 use tokio::sync::mpsc;
 
@@ -150,13 +150,14 @@ where
     }
 
     pub async fn run_sse_transport(&mut self) -> Result<(), McpError> {
-        let transport = SseTransport::new_server(
+        let transport = SseServerTransport::new_local(
             self.config.server.host.clone(),
             self.config.server.port,
             1024, // Buffer size
         );
         self.run_transport(transport).await
     }
+
     pub async fn run_unix_transport(&mut self) -> Result<(), McpError> {
         tracing::info!("Starting Unix transport");
         Ok(())
