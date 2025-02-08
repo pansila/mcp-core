@@ -446,7 +446,6 @@ impl Client {
         if let Some(env) = &self.env {
             let map = env.read().await;
             let secure_val = map.get(key).ok_or_else(|| {
-                println!("Secure value not found for key: {}", key);
                 McpError::InvalidRequest(format!("Secure value not found for key: {}", key))
             })?;
             match secure_val {

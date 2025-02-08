@@ -19,7 +19,8 @@ async fn test_client_env() -> Result<(), McpError> {
         },
         "array": [
             {
-                "test_key": ""
+                "test_key": "",
+                "test_key_one": ""
             }
         ],
         "container_two": {
@@ -36,10 +37,8 @@ async fn test_client_env() -> Result<(), McpError> {
         .apply_secure_replacements(&mut json_value)
         .await?;
 
-    // Debug print the key and the value of json_value
-    println!("Key: test_key, Value: {}", json_value["test_key"]);
-
     assert_eq!(json_value["test_key"], secure_value);
+    assert_eq!(json_value["array"][0]["test_key_one"], "");
 
     Ok(())
 }
