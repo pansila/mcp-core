@@ -8,7 +8,7 @@ use crate::{
         ListResourcesRequest, ListResourcesResponse, ReadResourceRequest, ReadResourceResponse,
     },
     tools::{CallToolRequest, ListToolsRequest, ListToolsResponse, ToolResult},
-    transport::{Transport, TransportCommand},
+    transport::{ClientTransportTrait, TransportCommand},
 };
 use serde_json::Value;
 use std::{
@@ -93,7 +93,7 @@ impl Client {
         }
     }
 
-    pub async fn connect<T: Transport>(
+    pub async fn connect<T: ClientTransportTrait>(
         &mut self,
         transport: T,
     ) -> Result<ProtocolHandle, McpError> {

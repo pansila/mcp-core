@@ -24,12 +24,19 @@ pub enum TransportEvent {
     Closed,
 }
 
-// Transport trait
 #[async_trait]
-pub trait Transport: Send + Sync + 'static {
-    /// Start the transport and return channels for communication
+pub trait TransportTrait: Send + Sync + 'static {
     async fn start(&mut self) -> Result<TransportChannels, McpError>;
+
+    fn default() -> Self
+    where
+        Self: Sized;
 }
+#[async_trait]
+pub trait ServerTransportTrait: TransportTrait {}
+
+#[async_trait]
+pub trait ClientTransportTrait: TransportTrait {}
 
 // Channels for communicating with the transport
 #[derive(Debug, Clone)]

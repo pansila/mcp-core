@@ -5,10 +5,13 @@ use tokio::{
     sync::mpsc,
 };
 
-use super::{JsonRpcMessage, Transport, TransportChannels, TransportCommand, TransportEvent};
+use super::{
+    ClientTransportTrait, JsonRpcMessage, ServerTransportTrait, TransportChannels,
+    TransportCommand, TransportEvent,
+};
 use crate::error::McpError;
 
-pub struct StdioTransport {
+pub struct ServerTransport {
     buffer_size: usize,
     #[cfg(test)]
     reader: Box<dyn AsyncRead + Unpin + Send + Sync>,
@@ -16,7 +19,7 @@ pub struct StdioTransport {
     writer: Box<dyn AsyncWrite + Unpin + Send + Sync>,
 }
 
-impl StdioTransport {
+impl ServerTransport {
     pub fn new(buffer_size: Option<usize>) -> Self {
         Self {
             buffer_size: buffer_size.unwrap_or(4092),
@@ -219,7 +222,7 @@ impl StdioTransport {
 }
 
 #[async_trait]
-impl Transport for StdioTransport {
+impl ServerTransportTrait for ServerTransport {
     async fn start(&mut self) -> Result<TransportChannels, McpError> {
         let (cmd_tx, cmd_rx) = mpsc::channel(self.buffer_size);
         let (event_tx, event_rx) = mpsc::channel(self.buffer_size);
@@ -244,6 +247,13 @@ impl Transport for StdioTransport {
         let event_rx = Arc::new(tokio::sync::Mutex::new(event_rx));
         Ok(TransportChannels { cmd_tx, event_rx })
     }
+
+    fn default() -> Self
+    where
+        Self: Sized,
+    {
+        Self::new(Some(1032))
+    }
 }
 
 #[cfg(test)]
@@ -259,7 +269,8 @@ mod tests {
         let (input_rx, mut input_tx) = io::duplex(64);
         let (output_rx, output_tx) = io::duplex(64);
 
-        let mut transport = StdioTransport::with_streams(BufReader::new(input_rx), output_tx, None);
+        let mut transport =
+            ServerTransport::with_streams(BufReader::new(input_rx), output_tx, None);
 
         let TransportChannels { cmd_tx, event_rx } = transport.start().await?;
 

@@ -8,6 +8,7 @@ use tracing::info;
 
 use crate::prompts::{GetPromptRequest, ListPromptsRequest, PromptCapabilities, PromptManager};
 use crate::tools::{ToolCapabilities, ToolManager};
+use crate::transport::ServerTransportTrait;
 use crate::{
     client::types::ServerCapabilities,
     error::McpError,
@@ -89,12 +90,13 @@ enum ServerState {
     ShuttingDown,
 }
 
-pub struct McpServer<H>
+pub struct McpServer<H, T>
 where
     H: RequestHandler + Send + Sync + 'static,
+    T: ServerTransportTrait,
 {
     pub handler: Arc<H>,
-    pub config: ServerConfig,
+    pub config: ServerConfig<T>,
     pub resource_manager: Arc<ResourceManager>,
     pub tool_manager: Arc<ToolManager>,
     pub prompt_manager: Arc<PromptManager>,
@@ -106,11 +108,12 @@ where
     client_capabilities: Arc<RwLock<Option<ClientCapabilities>>>,
 }
 
-impl<H> McpServer<H>
+impl<H, T> McpServer<H, T>
 where
     H: RequestHandler + Send + Sync + 'static,
+    T: ServerTransportTrait,
 {
-    pub fn new(config: ServerConfig, handler: H) -> Self {
+    pub fn new(config: ServerConfig<T>, handler: H) -> Self {
         let (notification_tx, notification_rx) = mpsc::channel(100);
         let (state_tx, state_rx) = watch::channel(ServerState::Created);
 
@@ -144,7 +147,7 @@ where
         self.handler.handle_request(method, params).await
     }
 
-    pub async fn run_transport<T: Transport>(&mut self, transport: T) -> Result<(), McpError> {
+    pub async fn run(&mut self) -> Result<(), McpError> {
         self.notification_rx.take().ok_or_else(|| {
             McpError::InternalError("Notification receiver already taken".to_string())
         })?;
@@ -321,7 +324,7 @@ where
         )
         .build();
 
-        let protocol_handle = protocol.connect(transport).await?;
+        let protocol_handle = protocol.connect(self.config.server.transport).await?;
 
         shutdown_rx.recv().await;
 

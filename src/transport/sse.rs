@@ -1,4 +1,7 @@
-use super::{JsonRpcMessage, Transport, TransportChannels, TransportCommand, TransportEvent};
+use super::{
+    ClientTransportTrait, JsonRpcMessage, ServerTransportTrait, TransportChannels,
+    TransportCommand, TransportEvent, TransportTrait,
+};
 use crate::error::McpError;
 use async_trait::async_trait;
 use futures::TryStreamExt;
@@ -56,7 +59,7 @@ impl ServerTransport {
 }
 
 #[async_trait]
-impl Transport for ServerTransport {
+impl TransportTrait for ServerTransport {
     async fn start(&mut self) -> Result<TransportChannels, McpError> {
         let (cmd_tx, mut cmd_rx) = mpsc::channel(self.buffer_size);
         let (event_tx, event_rx) = mpsc::channel(self.buffer_size);
@@ -186,6 +189,15 @@ impl Transport for ServerTransport {
 
         Ok(TransportChannels { cmd_tx, event_rx })
     }
+
+    fn default() -> Self {
+        Self {
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+            public_url: None,
+            buffer_size: 1024,
+        }
+    }
 }
 
 pub struct ClientTransport {
@@ -214,7 +226,7 @@ impl ClientTransport {
 }
 
 #[async_trait]
-impl Transport for ClientTransport {
+impl ClientTransportTrait for ClientTransport {
     async fn start(&mut self) -> Result<TransportChannels, McpError> {
         let (cmd_tx, mut cmd_rx) = mpsc::channel(self.buffer_size);
         let (event_tx, event_rx) = mpsc::channel(self.buffer_size);
@@ -303,5 +315,12 @@ impl Transport for ClientTransport {
 
         let event_rx = Arc::new(Mutex::new(event_rx));
         Ok(TransportChannels { cmd_tx, event_rx })
+    }
+
+    fn default() -> Self {
+        Self {
+            endpoint: "http://localhost:3030".to_string(),
+            buffer_size: 1024,
+        }
     }
 }

@@ -1,6 +1,9 @@
 use crate::{
     error::McpError,
-    transport::{Transport, TransportChannels, TransportCommand, TransportEvent},
+    transport::{
+        ClientTransportTrait, ServerTransportTrait, TransportChannels, TransportCommand,
+        TransportEvent,
+    },
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
