@@ -1,5 +1,7 @@
 use clap::Parser;
 use mcp_core::logging::McpSubscriber;
+use mcp_core::transport::stdio::StdioTransport;
+use mcp_core::transport::SseServerTransport;
 use mcp_core::{
     error::McpError,
     prompts::Prompt,
@@ -73,6 +75,8 @@ async fn main() -> Result<(), McpError> {
     };
 
     let transport = config.server.transport.clone();
+
+    let server_config = config.server.clone();
 
     // Log startup info
     tracing::info!(
@@ -193,7 +197,7 @@ async fn main() -> Result<(), McpError> {
 
             // Run server and wait for shutdown
             tokio::select! {
-                result = server.run_stdio_transport() => {
+                result = server.run_transport(StdioTransport::new(Some(1024))) => {
                     if let Err(e) = result {
                         tracing::error!("Server error: {}", e);
                     }
@@ -211,7 +215,7 @@ async fn main() -> Result<(), McpError> {
 
             // Run server and wait for shutdown
             tokio::select! {
-                result = server.run_sse_transport() => {
+                result = server.run_transport(SseServerTransport::new_local(server_config.clone().host, server_config.clone().port, 1024)) => {
                     if let Err(e) = result {
                         tracing::error!("Server error: {}", e);
                     }

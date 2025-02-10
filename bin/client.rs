@@ -10,8 +10,8 @@ use serde_json::json;
 #[command(name = "mcp-client", version, about = "MCP Client CLI")]
 struct Cli {
     /// Server URL for SSE transport
-    #[arg(short, long)]
-    server: Option<String>,
+    #[arg(short, long, default_value = "http://127.0.0.1:3000")]
+    server: String,
 
     /// Transport type (stdio, sse)
     #[arg(short, long, default_value = "stdio")] // Changed default to stdio
@@ -116,15 +116,9 @@ async fn main() -> Result<(), McpError> {
             }
         }
         "sse" => {
-            if let Some(server_url) = args.server {
-                println!("Connecting using SSE transport: {}", server_url);
-                let transport = SseClientTransport::new(server_url, 32);
-                client.connect(transport).await?;
-            } else {
-                return Err(McpError::InvalidRequest(
-                    "Server URL is required for SSE transport".to_string(),
-                ));
-            }
+            println!("Connecting using SSE transport: {}", args.server);
+            let transport = SseClientTransport::new(args.server, 1024);
+            client.connect(transport).await?;
         }
         _ => {
             return Err(McpError::InvalidRequest(

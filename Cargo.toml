@@ -1,6 +1,6 @@
 [package]
 name = "mcp-core"
-version = "0.0.71"
+version = "0.0.72"
 edition = "2021"
 description = "A Rust library implementing the Modern Context Protocol (MCP)"
 license = "MIT"
@@ -39,10 +39,6 @@ path = "bin/server.rs"
 [[bin]]
 name = "client"
 path = "bin/client.rs"
-
-[[bin]]
-name = "public_server"
-path = "bin/public_server.rs"
 
 [lib]
 name = "mcp_core"
