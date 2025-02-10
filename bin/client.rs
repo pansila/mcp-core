@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use mcp_core::{
     client::{types::ClientInfo, Client},
     error::McpError,
-    transport::{stdio::StdioTransport, SseClientTransport},
+    transport::{SseClientTransport, StdioClientTransport},
 };
 use serde_json::json;
 
@@ -14,7 +14,7 @@ struct Cli {
     server: String,
 
     /// Transport type (stdio, sse)
-    #[arg(short, long, default_value = "stdio")] // Changed default to stdio
+    #[arg(short, long, default_value = "stdio")]
     transport: String,
 
     #[command(subcommand)]
@@ -85,7 +85,7 @@ async fn main() -> Result<(), McpError> {
     // Set up transport with better error handling
     match args.transport.as_str() {
         "stdio" => {
-            let transport = StdioTransport::new(None);
+            let transport = StdioClientTransport::new(None);
             tracing::info!("Connecting using stdio transport...");
             match client.connect(transport).await {
                 Ok(_) => tracing::info!("Successfully connected to server"),

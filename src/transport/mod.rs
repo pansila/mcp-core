@@ -9,6 +9,8 @@ use crate::{
 
 pub use sse::ClientTransport as SseClientTransport;
 pub use sse::ServerTransport as SseServerTransport;
+pub use stdio::ClientTransport as StdioClientTransport;
+pub use stdio::ServerTransport as StdioServerTransport;
 
 // Message types for the transport actor
 #[derive(Debug)]
@@ -24,11 +26,14 @@ pub enum TransportEvent {
     Closed,
 }
 
-// Transport trait
 #[async_trait]
-pub trait Transport: Send + Sync + 'static {
-    /// Start the transport and return channels for communication
-    async fn start(&mut self) -> Result<TransportChannels, McpError>;
+pub trait ServerTransportTrait: Send + Sync + Sized + 'static {
+    async fn start(&self) -> Result<TransportChannels, McpError>;
+}
+
+#[async_trait]
+pub trait ClientTransportTrait: Send + Sync + Sized + 'static {
+    async fn start(&self) -> Result<TransportChannels, McpError>;
 }
 
 // Channels for communicating with the transport

@@ -8,7 +8,7 @@ use crate::{
         ListResourcesRequest, ListResourcesResponse, ReadResourceRequest, ReadResourceResponse,
     },
     tools::{CallToolRequest, ListToolsRequest, ListToolsResponse, ToolResult},
-    transport::{Transport, TransportCommand},
+    transport::{self, ClientTransportTrait, TransportChannels, TransportCommand},
 };
 use serde_json::Value;
 use std::{
@@ -93,12 +93,15 @@ impl Client {
         }
     }
 
-    pub async fn connect<T: Transport>(
+    pub async fn connect(
         &mut self,
-        transport: T,
+        transport: impl ClientTransportTrait,
     ) -> Result<ProtocolHandle, McpError> {
         let timeout = Duration::from_secs(30);
-        match tokio::time::timeout(timeout, self.protocol.connect(transport)).await {
+
+        let TransportChannels { cmd_tx, event_rx } = transport.start().await?;
+
+        match tokio::time::timeout(timeout, self.protocol.connect(cmd_tx, event_rx)).await {
             Ok(result) => result,
             Err(_) => Err(McpError::ConnectionClosed),
         }

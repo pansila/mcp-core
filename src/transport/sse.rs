@@ -1,4 +1,7 @@
-use super::{JsonRpcMessage, Transport, TransportChannels, TransportCommand, TransportEvent};
+use super::{
+    ClientTransportTrait, JsonRpcMessage, ServerTransportTrait, TransportChannels,
+    TransportCommand, TransportEvent,
+};
 use crate::error::McpError;
 use async_trait::async_trait;
 use futures::TryStreamExt;
@@ -21,6 +24,7 @@ struct EndpointEvent {
     endpoint: String,
 }
 
+#[derive(Clone)]
 pub struct ServerTransport {
     host: String,
     port: u16,
@@ -56,8 +60,8 @@ impl ServerTransport {
 }
 
 #[async_trait]
-impl Transport for ServerTransport {
-    async fn start(&mut self) -> Result<TransportChannels, McpError> {
+impl ServerTransportTrait for ServerTransport {
+    async fn start(&self) -> Result<TransportChannels, McpError> {
         let (cmd_tx, mut cmd_rx) = mpsc::channel(self.buffer_size);
         let (event_tx, event_rx) = mpsc::channel(self.buffer_size);
         let (broadcast_tx, _) = tokio::sync::broadcast::channel::<JsonRpcMessage>(100);
@@ -188,6 +192,7 @@ impl Transport for ServerTransport {
     }
 }
 
+#[derive(Clone)]
 pub struct ClientTransport {
     endpoint: String,
     buffer_size: usize,
@@ -214,8 +219,8 @@ impl ClientTransport {
 }
 
 #[async_trait]
-impl Transport for ClientTransport {
-    async fn start(&mut self) -> Result<TransportChannels, McpError> {
+impl ClientTransportTrait for ClientTransport {
+    async fn start(&self) -> Result<TransportChannels, McpError> {
         let (cmd_tx, mut cmd_rx) = mpsc::channel(self.buffer_size);
         let (event_tx, event_rx) = mpsc::channel(self.buffer_size);
 

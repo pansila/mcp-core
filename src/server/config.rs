@@ -18,14 +18,11 @@ pub struct ServerConfig {
     pub prompts: Vec<Prompt>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerSettings {
     pub name: String,
     pub version: String,
-    pub transport: TransportType,
-    pub host: String,
-    pub port: u16,
     pub max_connections: usize,
     pub timeout_ms: u64,
 }
@@ -148,9 +145,6 @@ impl Default for ServerConfig {
             server: ServerSettings {
                 name: "mcp-server".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
-                transport: TransportType::Stdio,
-                host: "127.0.0.1".to_string(),
-                port: 3000,
                 max_connections: 100,
                 timeout_ms: 30000,
             },
