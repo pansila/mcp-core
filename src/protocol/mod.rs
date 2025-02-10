@@ -187,12 +187,11 @@ impl Protocol {
     }
 
     // Modify connect to return ProtocolHandle
-    pub async fn connect<T: Transport>(
+    pub async fn connect(
         &mut self,
-        mut transport: T,
+        cmd_tx: mpsc::Sender<TransportCommand>,
+        event_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<TransportEvent>>>,
     ) -> Result<ProtocolHandle, McpError> {
-        let TransportChannels { cmd_tx, event_rx } = transport.start().await?;
-
         self.cmd_tx = Some(cmd_tx.clone());
         self.event_rx = Some(Arc::clone(&event_rx));
 

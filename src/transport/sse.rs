@@ -1,6 +1,6 @@
 use super::{
     ClientTransportTrait, JsonRpcMessage, ServerTransportTrait, TransportChannels,
-    TransportCommand, TransportEvent, TransportTrait,
+    TransportCommand, TransportEvent,
 };
 use crate::error::McpError;
 use async_trait::async_trait;
@@ -24,6 +24,7 @@ struct EndpointEvent {
     endpoint: String,
 }
 
+#[derive(Clone)]
 pub struct ServerTransport {
     host: String,
     port: u16,
@@ -59,8 +60,8 @@ impl ServerTransport {
 }
 
 #[async_trait]
-impl TransportTrait for ServerTransport {
-    async fn start(&mut self) -> Result<TransportChannels, McpError> {
+impl ServerTransportTrait for ServerTransport {
+    async fn start(&self) -> Result<TransportChannels, McpError> {
         let (cmd_tx, mut cmd_rx) = mpsc::channel(self.buffer_size);
         let (event_tx, event_rx) = mpsc::channel(self.buffer_size);
         let (broadcast_tx, _) = tokio::sync::broadcast::channel::<JsonRpcMessage>(100);
@@ -189,17 +190,9 @@ impl TransportTrait for ServerTransport {
 
         Ok(TransportChannels { cmd_tx, event_rx })
     }
-
-    fn default() -> Self {
-        Self {
-            host: "127.0.0.1".to_string(),
-            port: 3000,
-            public_url: None,
-            buffer_size: 1024,
-        }
-    }
 }
 
+#[derive(Clone)]
 pub struct ClientTransport {
     endpoint: String,
     buffer_size: usize,
@@ -227,7 +220,7 @@ impl ClientTransport {
 
 #[async_trait]
 impl ClientTransportTrait for ClientTransport {
-    async fn start(&mut self) -> Result<TransportChannels, McpError> {
+    async fn start(&self) -> Result<TransportChannels, McpError> {
         let (cmd_tx, mut cmd_rx) = mpsc::channel(self.buffer_size);
         let (event_tx, event_rx) = mpsc::channel(self.buffer_size);
 
@@ -315,12 +308,5 @@ impl ClientTransportTrait for ClientTransport {
 
         let event_rx = Arc::new(Mutex::new(event_rx));
         Ok(TransportChannels { cmd_tx, event_rx })
-    }
-
-    fn default() -> Self {
-        Self {
-            endpoint: "http://localhost:3030".to_string(),
-            buffer_size: 1024,
-        }
     }
 }

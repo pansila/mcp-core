@@ -1,16 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::{prompts::Prompt, tools::ToolType, transport::ServerTransportTrait};
+use crate::{prompts::Prompt, tools::ToolType};
 
 // Server Configuration
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ServerConfig<T>
-where
-    T: ServerTransportTrait,
-{
-    pub server: ServerSettings<T>,
+pub struct ServerConfig {
+    pub server: ServerSettings,
     pub resources: ResourceSettings,
     pub security: SecuritySettings,
     pub logging: LoggingSettings,
@@ -21,15 +18,11 @@ where
     pub prompts: Vec<Prompt>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct ServerSettings<T>
-where
-    T: ServerTransportTrait,
-{
+pub struct ServerSettings {
     pub name: String,
     pub version: String,
-    pub transport: T,
     pub max_connections: usize,
     pub timeout_ms: u64,
 }
@@ -146,13 +139,12 @@ pub enum LogFormat {
     Compact,
 }
 
-impl<T: ServerTransportTrait> Default for ServerConfig<T> {
+impl Default for ServerConfig {
     fn default() -> Self {
         ServerConfig {
             server: ServerSettings {
                 name: "mcp-server".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
-                transport: T::default(),
                 max_connections: 100,
                 timeout_ms: 30000,
             },

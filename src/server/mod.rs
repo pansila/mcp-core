@@ -4,23 +4,18 @@ use serde_json::Value;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::watch;
 use tokio::sync::RwLock;
-use tracing::info;
 
 use crate::prompts::{GetPromptRequest, ListPromptsRequest, PromptCapabilities, PromptManager};
 use crate::tools::{ToolCapabilities, ToolManager};
 use crate::transport::ServerTransportTrait;
+use crate::transport::TransportChannels;
 use crate::{
     client::types::ServerCapabilities,
     error::McpError,
-    logging::{LoggingCapabilities, LoggingManager, SetLevelRequest},
-    protocol::types::*,
-    protocol::{
-        BasicRequestHandler, JsonRpcNotification, Protocol, ProtocolBuilder, ProtocolOptions,
-        RequestHandler,
-    },
+    logging::{LoggingCapabilities, LoggingManager},
+    protocol::{JsonRpcNotification, Protocol, ProtocolOptions, RequestHandler},
     resource::{ListResourcesRequest, ReadResourceRequest, ResourceCapabilities, ResourceManager},
     tools::{CallToolRequest, ListToolsRequest},
-    transport::{stdio::StdioTransport, SseServerTransport, Transport},
 };
 use tokio::sync::mpsc;
 
@@ -90,13 +85,12 @@ enum ServerState {
     ShuttingDown,
 }
 
-pub struct McpServer<H, T>
+pub struct McpServer<H>
 where
     H: RequestHandler + Send + Sync + 'static,
-    T: ServerTransportTrait,
 {
     pub handler: Arc<H>,
-    pub config: ServerConfig<T>,
+    pub config: ServerConfig,
     pub resource_manager: Arc<ResourceManager>,
     pub tool_manager: Arc<ToolManager>,
     pub prompt_manager: Arc<PromptManager>,
@@ -108,12 +102,11 @@ where
     client_capabilities: Arc<RwLock<Option<ClientCapabilities>>>,
 }
 
-impl<H, T> McpServer<H, T>
+impl<H> McpServer<H>
 where
     H: RequestHandler + Send + Sync + 'static,
-    T: ServerTransportTrait,
 {
-    pub fn new(config: ServerConfig<T>, handler: H) -> Self {
+    pub fn new(config: ServerConfig, handler: H) -> Self {
         let (notification_tx, notification_rx) = mpsc::channel(100);
         let (state_tx, state_rx) = watch::channel(ServerState::Created);
 
@@ -147,7 +140,7 @@ where
         self.handler.handle_request(method, params).await
     }
 
-    pub async fn run(&mut self) -> Result<(), McpError> {
+    pub async fn run(&mut self, transport: impl ServerTransportTrait) -> Result<(), McpError> {
         self.notification_rx.take().ok_or_else(|| {
             McpError::InternalError("Notification receiver already taken".to_string())
         })?;
@@ -324,7 +317,9 @@ where
         )
         .build();
 
-        let protocol_handle = protocol.connect(self.config.server.transport).await?;
+        let TransportChannels { cmd_tx, event_rx } = transport.start().await?;
+
+        let protocol_handle = protocol.connect(cmd_tx, event_rx).await?;
 
         shutdown_rx.recv().await;
 
