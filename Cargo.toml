@@ -1,50 +1,41 @@
+[workspace]
+members = [
+  ".",
+  "examples/client",
+  "examples/file_system",
+  "examples/knowledge_graph_memory",
+  "examples/pingpong",
+]
+default-members = ["examples/file_system", "examples/pingpong"]
+
 [package]
 name = "mcp-core"
-version = "0.0.81"
+version = "0.0.9"
 edition = "2021"
 description = "A Rust library implementing the Modern Context Protocol (MCP)"
-license = "MIT"
 repository = "https://github.com/stevohuncho/mcp-core"
-
+license = "Apache-2.0"
+authors = ["https://github.com/stevohuncho"]
+documentation = "https://github.com/stevohuncho/mcp-core#readme"
+homepage = "https://github.com/stevohuncho/mcp-core"
+readme = "README.md"
 [dependencies]
-async-trait = "0.1.83"
+tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.41.1", features = ["full"] }
-thiserror = "2.0.3"
-tracing = "0.1.40"
-tokio-util = "0.7.12"
-jsonrpc-core = "18.0.0"
-warp = "0.3.7"
-jsonrpc-derive = "18.0.0"
-futures = "0.3.31"
-uuid = { version = "1.11.0", features = ["v4"] }
-url = "2.5.4"
-base64 = "0.22.1"
-async-stream = "0.3.6"
-mime_guess = "2.0.5"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-config = "0.15.7"
-clap = { version = "4.5.21", features = ["derive"] }
-reqwest = { version = "0.12.9", features = ["json"] }
-reqwest-eventsource = "0.6.0"
-mime = "0.3.17"
-tracing-core = "0.1.33"
-async-recursion = "1.1.1"
-
-[[bin]]
-name = "server"
-path = "bin/server.rs"
-
-[[bin]]
-name = "client"
-path = "bin/client.rs"
-
-[lib]
-name = "mcp_core"
-path = "src/lib.rs"
+anyhow = "1.0"
+async-trait = "0.1"
+url = { version = "2.5", features = ["serde"] }
+tracing = "0.1"
+reqwest = { version = "0.12.12", features = ["stream", "json"] }
+actix-web = "4"
+tokio-stream = "0.1"
+futures = "0.3"
+jsonwebtoken = "8.1"
+uuid = { version = "1.0", features = ["v4"] }
+actix-ws = "0.2.5"
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+dotenv = "0.15.0"
 
 [dev-dependencies]
-tempfile = "3.14.0"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tokio = { version = "1.0", features = ["full", "test-util"] }
+tracing-subscriber = "0.3"

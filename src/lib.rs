@@ -1,16 +1,8 @@
-use protocol::JsonRpcNotification;
-
-pub mod error;
-pub mod server;
-pub mod transport;
-pub mod resource;
-pub mod protocol;
-pub mod tools;
-pub mod prompts;
-pub mod logging;
 pub mod client;
-
-#[derive(Debug, Clone)]
-pub struct NotificationSender {
-    pub tx: tokio::sync::mpsc::Sender<JsonRpcNotification>,
-}
+pub mod protocol;
+pub mod server;
+pub mod sse;
+pub mod tools;
+pub use sse::http_server::run_http_server;
+pub mod transport;
+pub mod types;
