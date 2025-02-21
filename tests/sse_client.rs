@@ -8,8 +8,13 @@ use serde_json::json;
 
 #[tokio::test]
 async fn test_sse_client_list_tools() -> Result<(), anyhow::Error> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_writer(std::io::stderr)
+        .init();
+
     let transport =
-        ClientSseTransportBuilder::new("https://twitter-mcp.fabelis.ai".to_string()).build();
+        ClientSseTransportBuilder::new("https://discord-mcp.fabelis.ai".to_string()).build();
     transport.open().await?;
 
     let client = ClientBuilder::new(transport).use_strict().build();

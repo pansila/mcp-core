@@ -20,6 +20,7 @@ use anyhow::Result;
 use serde::{de::DeserializeOwned, Serialize};
 use std::future::Future;
 use std::pin::Pin;
+use tracing::info;
 
 #[derive(Clone)]
 pub struct ServerState {

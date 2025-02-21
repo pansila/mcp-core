@@ -1,20 +1,20 @@
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
-use mcp_core::{run_http_server, transport::ServerStdioTransport};
+use mcp_core::{run_http_server, sse::http_server::Host, transport::ServerStdioTransport};
 use pingpong::server::build_server;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
     /// Transport type to use
-    #[arg(value_enum, default_value_t = TransportType::Http)]
+    #[arg(value_enum, default_value_t = TransportType::Sse)]
     transport: TransportType,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
 enum TransportType {
     Stdio,
-    Http,
+    Sse,
 }
 
 #[tokio::main]
@@ -35,11 +35,19 @@ async fn main() -> Result<()> {
                 .await
                 .map_err(|e| anyhow::anyhow!("Server error: {}", e))?;
         }
-        TransportType::Http => {
-            run_http_server(3004, None, |transport| async move {
-                let server = build_server(transport);
-                Ok(server)
-            })
+        TransportType::Sse => {
+            run_http_server(
+                Host {
+                    host: "0.0.0.0".to_string(),
+                    port: 8080,
+                    public_url: None,
+                },
+                None,
+                |transport| async move {
+                    let server = build_server(transport);
+                    Ok(server)
+                },
+            )
             .await?;
         }
     };

@@ -10,7 +10,7 @@ default-members = ["examples/file_system", "examples/pingpong"]
 
 [package]
 name = "mcp-core"
-version = "0.0.9"
+version = "0.0.91"
 edition = "2021"
 description = "A Rust library implementing the Modern Context Protocol (MCP)"
 repository = "https://github.com/stevohuncho/mcp-core"
@@ -19,6 +19,7 @@ authors = ["https://github.com/stevohuncho"]
 documentation = "https://github.com/stevohuncho/mcp-core#readme"
 homepage = "https://github.com/stevohuncho/mcp-core"
 readme = "README.md"
+
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -27,7 +28,8 @@ anyhow = "1.0"
 async-trait = "0.1"
 url = { version = "2.5", features = ["serde"] }
 tracing = "0.1"
-reqwest = { version = "0.12.12", features = ["stream", "json"] }
+reqwest = { version = "0.12.12", features = ["json"] }
+reqwest-eventsource = "0.6.0"
 actix-web = "4"
 tokio-stream = "0.1"
 futures = "0.3"
@@ -35,7 +37,7 @@ jsonwebtoken = "8.1"
 uuid = { version = "1.0", features = ["v4"] }
 actix-ws = "0.2.5"
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
-dotenv = "0.15.0"
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
+dotenv = "0.15.0"
