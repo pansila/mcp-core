@@ -4,6 +4,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use reqwest::header::{HeaderName, HeaderValue};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::{collections::HashMap, str::FromStr};
 use tokio::sync::{broadcast, Mutex};
@@ -102,15 +104,21 @@ impl Transport for ServerWsTransport {
         }
     }
 
-    async fn send(&self, message: &Message) -> Result<()> {
-        let text = serde_json::to_string(message)?;
-        if let Some(session) = self.session.lock().await.as_mut() {
-            debug!("Server sending message: {}", text);
-            session.text(text).await?;
-        } else {
-            debug!("Server send called but session is None");
-        }
-        Ok(())
+    fn send(
+        &self,
+        message: &Message,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + '_>> {
+        let message = message.clone();
+        Box::pin(async move {
+            let text = serde_json::to_string(&message)?;
+            if let Some(session) = self.session.lock().await.as_mut() {
+                debug!("Server sending message: {}", text);
+                session.text(text).await?;
+            } else {
+                debug!("Server send called but session is None");
+            }
+            Ok(())
+        })
     }
 
     async fn open(&self) -> Result<()> {
@@ -146,15 +154,21 @@ impl Transport for ClientWsTransport {
         }
     }
 
-    async fn send(&self, message: &Message) -> Result<()> {
-        let text = serde_json::to_string(message)?;
-        if let Some(write) = self.ws_write.lock().await.as_mut() {
-            debug!("Client sending message: {}", text);
-            write.send(TungsteniteMessage::Text(text.into())).await?;
-        } else {
-            debug!("Client send called but writer is None");
-        }
-        Ok(())
+    fn send(
+        &self,
+        message: &Message,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + '_>> {
+        let message = message.clone();
+        Box::pin(async move {
+            let text = serde_json::to_string(&message)?;
+            if let Some(write) = self.ws_write.lock().await.as_mut() {
+                debug!("Client sending message: {}", text);
+                write.send(TungsteniteMessage::Text(text.into())).await?;
+            } else {
+                debug!("Client send called but writer is None");
+            }
+            Ok(())
+        })
     }
 
     async fn open(&self) -> Result<()> {

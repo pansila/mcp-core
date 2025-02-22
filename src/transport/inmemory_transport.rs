@@ -1,6 +1,8 @@
 use super::{Message, Transport};
 use anyhow::Result;
 use async_trait::async_trait;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
@@ -44,13 +46,19 @@ impl Transport for ServerInMemoryTransport {
         }
     }
 
-    async fn send(&self, message: &Message) -> Result<()> {
-        debug!("Server sending: {:?}", message);
-        self.tx
-            .send(message.clone())
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to send message: {}", e))?;
-        Ok(())
+    fn send(
+        &self,
+        message: &Message,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + '_>> {
+        let tx = self.tx.clone();
+        let message = message.clone();
+        Box::pin(async move {
+            debug!("Server sending: {:?}", message);
+            tx.send(message)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to send message: {}", e))?;
+            Ok(())
+        })
     }
 
     async fn open(&self) -> Result<()> {
@@ -106,17 +114,24 @@ impl Transport for ClientInMemoryTransport {
         }
     }
 
-    async fn send(&self, message: &Message) -> Result<()> {
-        let tx_guard = self.tx.lock().await;
-        let tx = tx_guard
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Transport not opened"))?;
+    fn send(
+        &self,
+        message: &Message,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + '_>> {
+        let tx = self.tx.clone();
+        let message = message.clone();
+        Box::pin(async move {
+            let tx_guard = tx.lock().await;
+            let tx = tx_guard
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Transport not opened"))?;
 
-        debug!("Client sending: {:?}", message);
-        tx.send(message.clone())
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to send message: {}", e))?;
-        Ok(())
+            debug!("Client sending: {:?}", message);
+            tx.send(message)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to send message: {}", e))?;
+            Ok(())
+        })
     }
 
     async fn open(&self) -> Result<()> {

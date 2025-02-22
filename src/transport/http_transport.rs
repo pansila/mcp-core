@@ -1,3 +1,5 @@
+use std::{future::Future, pin::Pin};
+
 use super::{
     ClientSseTransport, ClientWsTransport, Message, ServerSseTransport, ServerWsTransport,
     Transport,
@@ -23,11 +25,18 @@ impl Clone for ServerHttpTransport {
 
 #[async_trait::async_trait]
 impl Transport for ServerHttpTransport {
-    async fn send(&self, message: &Message) -> Result<()> {
-        match self {
-            ServerHttpTransport::Sse(sse) => sse.send(message).await,
-            ServerHttpTransport::Ws(ws) => ws.send(message).await,
-        }
+    fn send(
+        &self,
+        message: &Message,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + '_>> {
+        let transport = self.clone();
+        let message = message.clone();
+        Box::pin(async move {
+            match transport {
+                ServerHttpTransport::Sse(sse) => sse.send(&message).await,
+                ServerHttpTransport::Ws(ws) => ws.send(&message).await,
+            }
+        })
     }
 
     async fn receive(&self) -> Result<Option<Message>> {
@@ -63,11 +72,18 @@ impl Clone for ClientHttpTransport {
 
 #[async_trait::async_trait]
 impl Transport for ClientHttpTransport {
-    async fn send(&self, message: &Message) -> Result<()> {
-        match self {
-            ClientHttpTransport::Sse(sse) => sse.send(message).await,
-            ClientHttpTransport::Ws(ws) => ws.send(message).await,
-        }
+    fn send(
+        &self,
+        message: &Message,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + '_>> {
+        let transport = self.clone();
+        let message = message.clone();
+        Box::pin(async move {
+            match transport {
+                ClientHttpTransport::Sse(sse) => sse.send(&message).await,
+                ClientHttpTransport::Ws(ws) => ws.send(&message).await,
+            }
+        })
     }
 
     async fn receive(&self) -> Result<Option<Message>> {

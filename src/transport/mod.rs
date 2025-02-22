@@ -2,6 +2,8 @@
 //! handles the serialization and deserialization of message
 //! handles send and receive of messages
 //! defines transport layer types
+use std::{future::Future, pin::Pin};
+
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -23,7 +25,10 @@ pub type Message = JsonRpcMessage;
 #[async_trait]
 pub trait Transport: Send + Sync + 'static {
     /// Send a message to the transport
-    async fn send(&self, message: &Message) -> Result<()>;
+    fn send(
+        &self,
+        message: &Message,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + '_>>;
 
     /// Receive a message from the transport
     /// this is blocking call

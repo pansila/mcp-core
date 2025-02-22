@@ -11,6 +11,8 @@ use jsonwebtoken::{encode, EncodingKey, Header};
 use reqwest_eventsource::{Event, EventSource};
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, mpsc, Mutex};
@@ -94,11 +96,18 @@ impl Transport for ServerSseTransport {
         }
     }
 
-    async fn send(&self, message: &Message) -> Result<()> {
-        let formatted = Self::format_sse_message(message)?;
-        debug!("Sending chunked SSE message: {}", formatted);
-        self.sse_tx.send(message.clone())?;
-        Ok(())
+    fn send(
+        &self,
+        message: &Message,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + '_>> {
+        let message = message.clone();
+        let sse_tx = self.sse_tx.clone();
+        Box::pin(async move {
+            let formatted = Self::format_sse_message(&message)?;
+            debug!("Sending chunked SSE message: {}", formatted);
+            sse_tx.send(message)?;
+            Ok(())
+        })
     }
 
     async fn open(&self) -> Result<()> {
@@ -220,31 +229,34 @@ impl Transport for ClientSseTransport {
         }
     }
 
-    async fn send(&self, message: &Message) -> Result<()> {
-        let session_url = self
-            .session_url
-            .lock()
-            .await
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No session URL available"))?
-            .clone();
+    fn send(
+        &self,
+        message: &Message,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + '_>> {
+        let message = message.clone();
+        Box::pin(async move {
+            let session_url = {
+                let url = self.session_url.lock().await;
+                url.as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("No session URL available"))?
+                    .clone()
+            };
 
-        info!("Sending message to session URL: {}", session_url);
+            let request = self.client.post(session_url).json(&message);
 
-        let request = self.client.post(session_url).json(message);
+            let request = self.add_auth_header(request).await?;
+            let response = request.send().await?;
 
-        let request = self.add_auth_header(request).await?;
-        let response = request.send().await?;
+            if !response.status().is_success() {
+                let status = response.status();
+                let text = response.text().await?;
+                return Err(anyhow::anyhow!(
+                    "Failed to send message, status: {status}, body: {text}",
+                ));
+            }
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let text = response.text().await?;
-            return Err(anyhow::anyhow!(
-                "Failed to send message, status: {status}, body: {text}",
-            ));
-        }
-
-        Ok(())
+            Ok(())
+        })
     }
 
     async fn open(&self) -> Result<()> {

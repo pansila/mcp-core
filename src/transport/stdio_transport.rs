@@ -1,7 +1,9 @@
 use super::{Message, Transport};
 use anyhow::Result;
 use async_trait::async_trait;
+use std::future::Future;
 use std::io::{self, BufRead, Write};
+use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
@@ -29,15 +31,20 @@ impl Transport for ServerStdioTransport {
         Ok(Some(message))
     }
 
-    async fn send(&self, message: &Message) -> Result<()> {
-        let stdout = io::stdout();
-        let mut writer = stdout.lock();
-        let serialized = serde_json::to_string(message)?;
-        debug!("Sending: {serialized}");
-        writer.write_all(serialized.as_bytes())?;
-        writer.write_all(b"\n")?;
-        writer.flush()?;
-        Ok(())
+    fn send(
+        &self,
+        message: &Message,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + '_>> {
+        let serialized = serde_json::to_string(message).unwrap_or_default();
+        Box::pin(async move {
+            let stdout = io::stdout();
+            let mut writer = stdout.lock();
+            debug!("Sending: {serialized}");
+            writer.write_all(serialized.as_bytes())?;
+            writer.write_all(b"\n")?;
+            writer.flush()?;
+            Ok(())
+        })
     }
 
     async fn open(&self) -> Result<()> {
@@ -94,20 +101,28 @@ impl Transport for ClientStdioTransport {
         Ok(Some(message))
     }
 
-    async fn send(&self, message: &Message) -> Result<()> {
-        debug!("ClientStdioTransport: Starting to send message");
-        let mut stdin = self.stdin.lock().await;
-        let stdin = stdin
-            .as_mut()
-            .ok_or_else(|| anyhow::anyhow!("Transport not opened"))?;
+    fn send(
+        &self,
+        message: &Message,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + '_>> {
+        let serialized = match serde_json::to_string(message) {
+            Ok(s) => s,
+            Err(e) => return Box::pin(async move { Err(e.into()) }),
+        };
+        Box::pin(async move {
+            debug!("ClientStdioTransport: Starting to send message");
+            let mut stdin = self.stdin.lock().await;
+            let stdin = stdin
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("Transport not opened"))?;
 
-        let serialized = serde_json::to_string(message)?;
-        debug!("ClientStdioTransport: Sending to process: {serialized}");
-        stdin.write_all(serialized.as_bytes()).await?;
-        stdin.write_all(b"\n").await?;
-        stdin.flush().await?;
-        debug!("ClientStdioTransport: Successfully sent and flushed message");
-        Ok(())
+            debug!("ClientStdioTransport: Sending to process: {serialized}");
+            stdin.write_all(serialized.as_bytes()).await?;
+            stdin.write_all(b"\n").await?;
+            stdin.flush().await?;
+            debug!("ClientStdioTransport: Successfully sent and flushed message");
+            Ok(())
+        })
     }
 
     async fn open(&self) -> Result<()> {
