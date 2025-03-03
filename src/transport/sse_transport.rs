@@ -141,15 +141,15 @@ impl ClientSseTransport {
         ClientSseTransportBuilder::new(url)
     }
 
-    fn generate_token(&self) -> Result<String> {
+    fn generate_token(&self) -> Result<Option<String>> {
         if let Some(bearer_token) = &self.bearer_token {
-            return Ok(bearer_token.clone());
+            return Ok(Some(bearer_token.clone()));
         }
 
-        let auth_config = self
-            .auth_config
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Auth config not set"))?;
+        let auth_config = match self.auth_config.as_ref() {
+            Some(config) => config,
+            None => return Ok(None),
+        };
 
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as usize;
         let claims = Claims {
@@ -163,6 +163,7 @@ impl ClientSseTransport {
             &EncodingKey::from_secret(auth_config.jwt_secret.as_bytes()),
         )
         .map_err(Into::into)
+        .map(Some)
     }
 }
 
@@ -240,10 +241,12 @@ impl Transport for ClientSseTransport {
                     .clone()
             };
 
-            let request = self.client.post(session_url).json(&message);
+            let mut request = self.client.post(session_url).json(&message);
 
-            let token = self.generate_token()?;
-            let request = request.header("Authorization", format!("Bearer {}", token));
+            if let Some(token) = self.generate_token()? {
+                request = request.header("Authorization", format!("Bearer {}", token))
+            };
+
             let response = request.send().await?;
 
             if !response.status().is_success() {
