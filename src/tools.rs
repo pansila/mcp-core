@@ -25,7 +25,7 @@ impl Tools {
             .get(&req.name)
             .ok_or_else(|| anyhow::anyhow!("Tool not found: {}", req.name))?;
 
-        (handler.f)(req).await
+        Ok((handler.f)(req).await)
     }
 
     pub fn list_tools(&self) -> Vec<Tool> {
@@ -39,7 +39,7 @@ impl Tools {
 pub(crate) struct ToolHandler {
     pub tool: Tool,
     pub f: Box<
-        dyn Fn(CallToolRequest) -> Pin<Box<dyn Future<Output = Result<CallToolResponse>> + Send>>
+        dyn Fn(CallToolRequest) -> Pin<Box<dyn Future<Output = CallToolResponse> + Send>>
             + Send
             + Sync,
     >,

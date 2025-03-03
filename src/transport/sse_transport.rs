@@ -1,12 +1,8 @@
-use crate::sse::middleware::{AuthConfig, Claims};
-use crate::transport::JsonRpcMessage;
-
 use super::{Message, Transport};
-
-use actix_web::web::Bytes;
+use crate::sse::middleware::{AuthConfig, Claims};
 use anyhow::Result;
 use async_trait::async_trait;
-use futures::TryStreamExt;
+use futures::{StreamExt, TryStreamExt};
 use jsonwebtoken::{encode, EncodingKey, Header};
 use reqwest_eventsource::{Event, EventSource};
 
@@ -16,7 +12,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, mpsc, Mutex};
-use tracing::{debug, info};
+use tracing::debug;
+
+const CHUNK_SIZE: usize = 16 * 1024; // 16KB chunks
 
 #[derive(Clone)]
 pub struct ServerSseTransport {
@@ -44,7 +42,6 @@ impl ServerSseTransport {
 
     // Helper function to chunk message into SSE format
     fn format_sse_message(message: &Message) -> Result<String> {
-        const CHUNK_SIZE: usize = 16 * 1024; // 16KB chunks
         let json = serde_json::to_string(message)?;
         let mut result = String::new();
 
@@ -134,6 +131,7 @@ pub struct ClientSseTransport {
     server_url: String,
     client: reqwest::Client,
     auth_config: Option<AuthConfig>,
+    bearer_token: Option<String>,
     session_url: Arc<Mutex<Option<String>>>,
     headers: HashMap<String, String>,
 }
@@ -144,6 +142,10 @@ impl ClientSseTransport {
     }
 
     fn generate_token(&self) -> Result<String> {
+        if let Some(bearer_token) = &self.bearer_token {
+            return Ok(bearer_token.clone());
+        }
+
         let auth_config = self
             .auth_config
             .as_ref()
@@ -162,24 +164,13 @@ impl ClientSseTransport {
         )
         .map_err(Into::into)
     }
-
-    async fn add_auth_header(
-        &self,
-        request: reqwest::RequestBuilder,
-    ) -> Result<reqwest::RequestBuilder> {
-        if self.auth_config.is_some() {
-            let token = self.generate_token()?;
-            Ok(request.header("Authorization", format!("Bearer {}", token)))
-        } else {
-            Ok(request)
-        }
-    }
 }
 
 #[derive(Default)]
 pub struct ClientSseTransportBuilder {
     server_url: String,
     auth_config: Option<AuthConfig>,
+    bearer_token: Option<String>,
     headers: HashMap<String, String>,
 }
 
@@ -188,12 +179,18 @@ impl ClientSseTransportBuilder {
         Self {
             server_url,
             auth_config: None,
+            bearer_token: None,
             headers: HashMap::new(),
         }
     }
 
     pub fn with_auth(mut self, jwt_secret: String) -> Self {
         self.auth_config = Some(AuthConfig { jwt_secret });
+        self
+    }
+
+    pub fn with_bearer_token(mut self, token: String) -> Self {
+        self.bearer_token = Some(token);
         self
     }
 
@@ -210,6 +207,7 @@ impl ClientSseTransportBuilder {
             server_url: self.server_url,
             client: reqwest::Client::new(),
             auth_config: self.auth_config,
+            bearer_token: self.bearer_token,
             session_url: Arc::new(Mutex::new(None)),
             headers: self.headers,
         }
@@ -244,7 +242,8 @@ impl Transport for ClientSseTransport {
 
             let request = self.client.post(session_url).json(&message);
 
-            let request = self.add_auth_header(request).await?;
+            let token = self.generate_token()?;
+            let request = request.header("Authorization", format!("Bearer {}", token));
             let response = request.send().await?;
 
             if !response.status().is_success() {
@@ -263,6 +262,7 @@ impl Transport for ClientSseTransport {
         let tx = self.tx.clone();
         let server_url = self.server_url.clone();
         let auth_config = self.auth_config.clone();
+        let bearer_token = self.bearer_token.clone();
         let session_url = self.session_url.clone();
         let headers = self.headers.clone();
 
@@ -276,7 +276,9 @@ impl Transport for ClientSseTransport {
             }
 
             // Add auth header if configured
-            if let Some(auth_config) = auth_config {
+            if let Some(bearer_token) = bearer_token {
+                request = request.header("Authorization", format!("Bearer {}", bearer_token));
+            } else if let Some(auth_config) = auth_config {
                 let claims = Claims {
                     iat: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as usize,
                     exp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as usize + 3600,
@@ -336,63 +338,16 @@ impl Transport for ClientSseTransport {
     }
 
     async fn close(&self) -> Result<()> {
+        // Clear the session URL to prevent further message sending
+        *self.session_url.lock().await = None;
+
+        // Close the message channel by dropping the sender
+        drop(self.tx.clone());
+
+        // Wait for any pending messages to be processed
+        let mut rx = self.rx.lock().await;
+        while rx.try_recv().is_ok() {}
+
         Ok(())
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::transport::{JsonRpcMessage, JsonRpcRequest, JsonRpcVersion};
-
-//     #[test]
-//     fn test_parse_large_sse_message() {
-//         // This is the problematic message format we're seeing
-//         let large_json = r#"{"id":0,"result":{"tools":[{"description":"A powerful web search tool that provides comprehensive, real-time results using Tavily's AI search engine. Returns relevant web content with customizable parameters for result count, content type, and domain filtering. Ideal for gathering current information, news, and detailed web content analysis.","inputSchema":{"properties":{"days":{"default":3,"description":"The number of days back from the current date to include in the search results. This specifies the time frame of data to be retrieved. Please note that this feature is only available when using the 'news' search topic","type":"number"}}},"name":"tavily-search"}]},"jsonrpc":"2.0"}"#;
-
-//         // Format it as an SSE message with multiple data chunks
-//         let mut sse_message = String::new();
-//         sse_message.push_str("event: message\n");
-
-//         // Split the JSON into smaller chunks (simulating what the server does)
-//         let chunk_size = 100;
-//         for chunk in large_json.as_bytes().chunks(chunk_size) {
-//             if let Ok(chunk_str) = std::str::from_utf8(chunk) {
-//                 sse_message.push_str(&format!("data: {}\n", chunk_str));
-//             }
-//         }
-//         sse_message.push('\n');
-
-//         // Try to parse it
-//         let result = ClientSseTransport::parse_sse_message(&sse_message);
-//         assert!(result.is_some(), "Failed to parse SSE message");
-
-//         if let Some(SseEvent::Message(msg)) = result {
-//             // Verify the parsed message matches the original
-//             let parsed_json = serde_json::to_string(&msg).unwrap();
-//             assert_eq!(parsed_json, large_json);
-//         } else {
-//             panic!("Expected Message event");
-//         }
-//     }
-
-//     #[test]
-//     fn test_parse_real_sse_message() {
-//         // The actual message that's failing, but properly formatted
-//         let sse_message = concat!(
-//             "data: {\"id\":0,\"result\":{\"tools\":[{\"description\":\"A powerful web search tool that provides comprehensive, real-time results using Tavily's AI search engine. Returns relevant web content with customizable parameters for result count, content type, and domain filtering. Ideal for gathering current information, news, and detailed web content analysis.\",\"inputSchema\":{\"properties\":{\"days\":{\"default\":3,\"description\":\"The number of days back from the current date to include in the search results. This specifies the time frame of data to be retrieved. Please note that this feature is only available when using the 'news' search topic\",\"type\":\"number\"},\"exclude_domains\":{\"default\":[],\"description\":\"List of domains to specifically exclude, if the user asks to exclude a domain set this to the domain of the site\",\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"include_domains\":{\"default\":[],\"description\":\"A list of domains to specifically include in the search results, if the user asks to search on specific sites set this to the domain of the site\",\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"include_image_descriptions\":{\"default\":false,\"description\":\"Include a list of query-related images and their descriptions in the response\",\"type\":\"boolean\"},\"include_images\":{\"default\":false,\"description\":\"Include a list of query-related images in the response\",\"type\":\"boolean\"},\"include_raw_content\":{\"default\":false,\"description\":\"Include the cleaned and parsed HTML content of each search result\",\"type\":\"boolean\"},\"max_results\":{\"default\":10,\"description\":\"The maximum number of search results to return\",\"maximum\":20,\"minimum\":5,\"type\":\"number\"},\"query\":{\"description\":\"Search query\",\"type\":\"string\"},\"search_depth\":{\"default\":\"basic\",\"description\":\"The depth of the search. It can be 'basic' or 'advanced'\",\"enum\":[\"basic\",\"advanced\"],\"type\":\"string\"},\"time_range\":{\"description\":\"The time range back from the current date to include in the search results. This feature is available for both 'general' and 'news' search topics\",\"enum\":[\"day\",\"week\",\"month\",\"year\",\"d\",\"w\",\"m\",\"y\"],\"type\":\"string\"},\"topic\":{\"default\":\"general\",\"description\":\"The category of the search. This will determine which of our agents will be used for the search\",\"enum\":[\"general\",\"news\"],\"type\":\"string\"}},\"required\":[\"query\"],\"type\":\"object\"},\"name\":\"tavily-search\"},{\"description\":\"A powerful web content extraction tool that retrieves and processes raw content from specified URLs, ideal for data collection, content analysis, and research tasks.\",\"inputSchema\":{\"properties\":{\"extract_depth\":{\"default\":\"basic\",\"description\":\"Depth of extraction - 'basic' or 'advanced', if usrls are linkedin use 'advanced' or if explicitly told to use advanced\",\"enum\":[\"basic\",\"advanced\"],\"type\":\"string\"},\"include_images\":{\"default\":false,\"description\":\"Include a list of images extracted from the urls in the response\",\"type\":\"boolean\"},\"urls\":{\"description\":\"List of URLs to extract content from\",\"items\":{\"type\":\"string\"},\"type\":\"array\"}},\"required\":[\"urls\"],\"type\":\"object\"},\"name\":\"tavily-extract\"},{\"description\":\"Read the complete contents of a file from the file system. Handles various text encodings and provides detailed error messages if the file cannot be read. Use this tool when you need to examine the contents of a single file. Only works within allowed directories.\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"additionalProperties\":false,\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"type\":\"object\"},\"name\":\"read_file\"},{\"description\":\"Read the contents of multiple files simultaneously. This is more efficient than reading files one by one when you need to analyze or compare multiple files. Each file's content is returned with its path as a reference. Failed reads for individual files won't stop the entire operation. Only works within allowed directories.\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"additionalProperties\":false,\"properties\":{\"paths\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"}},\"required\":[\"paths\"],\"type\":\"object\"},\"name\":\"read_multiple_files\"},{\"description\":\"Create a new file or completely overwrite an existing file with new content. Use with caution as it will overwrite existing files without warning. Handles text content with proper encoding. Only works within allowed directories.\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"additionalProperties\":false,\"properties\":{\"content\":{\"type\":\"string\"},\"path\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"],\"type\":\"object\"},\"name\":\"write_file\"},{\"description\":\"Make line-based edits to a text file. Each edit replaces exact line sequences with new content. Returns a git-style diff showing the changes made. Only works within allowed directories.\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"additionalProperties\":false,\"properties\":{\"dryRun\":{\"default\":false,\"description\":\"Preview changes using git-style diff format\",\"type\":\"boolean\"},\"edits\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"newText\":{\"description\":\"Text to replace with\",\"type\":\"string\"},\"oldText\":{\"description\":\"Text to search for - must match exactly\",\"type\":\"string\"}},\"required\":[\"oldText\",\"newText\"],\"type\":\"object\"},\"type\":\"array\"},\"path\":{\"type\":\"string\"}},\"required\":[\"path\",\"edits\"],\"type\":\"object\"},\"name\":\"edit_file\"},{\"description\":\"Create a new directory or ensure a directory exists. Can create multiple nested directories in one operation. If the directory already exists, this operation will succeed silently. Perfect for setting up directory structures for projects or ensuring required paths exist. Only works within allowed directories.\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"additionalProperties\":false,\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"type\":\"object\"},\"name\":\"create_directory\"},{\"description\":\"Get a detailed listing of all files and directories in a specified path. Results clearly distinguish between files and directories with [FILE] and [DIR] prefixes. This tool is essential for understanding directory structure and finding specific files within a directory. Only works within allowed directories.\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"additionalProperties\":false,\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"type\":\"object\"},\"name\":\"list_directory\"},{\"description\":\"Get a recursive tree view of files and directories as a JSON structure. Each entry includes 'name', 'type' (file/directory), and 'children' for directories. Files have no children array, while directories always have a children array (which may be empty). The output is formatted with 2-space indentation for readability. Only works within allowed directories.\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"additionalProperties\":false,\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"type\":\"object\"},\"name\":\"directory_tree\"},{\"description\":\"Move or rename files and directories. Can move files between directories and rename them in a single operation. If the destination exists, the operation will fail. Works across different directories and can be used for simple renaming within the same directory. Both source and destination must be within allowed directories.\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"additionalProperties\":false,\"properties\":{\"destination\":{\"type\":\"string\"},\"source\":{\"type\":\"string\"}},\"required\":[\"source\",\"destination\"],\"type\":\"object\"},\"name\":\"move_file\"},{\"description\":\"Recursively search for files and directories matching a pattern. Searches through all subdirectories from the starting path. The search is case-insensitive and matches partial names. Returns full paths to all matching items. Great for finding files when you don't know their exact location. Only searches within allowed directories.\",\"inputSchema\":{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"additionalProperties\":false,\"properties\":{\"excludePatterns\":{\"default\":[],\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"path\":{\"type\":\"string\"},\"pattern\":{\"type\":\"string\"}},\"requ",
-//             "data: ired\":[\"path\",\"pattern\"],\"type\":\"object\"},\"name\":\"search_files\"},{\"description\":\"Retrieve detailed metadata about a file or directory. Returns comprehensive information including size, creation time, last modified time, permissions, and type. This tool is perfect for understanding file characteristics without reading the actual content. Only works within allowed directories.\",\"inputSchema\":{\"$schema\":\"http: //json-schema.org/draft-07/schema#\",\"additionalProperties\":false,\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"type\":\"object\"},\"name\":\"get_file_info\"},{\"description\":\"Returns the list of directories that this server is allowed to access. Use this to understand which directories are available before trying to access files.\",\"inputSchema\":{\"properties\":{},\"required\":[],\"type\":\"object\"},\"name\":\"list_allowed_directories\"}]},\"jsonrpc\":\"2.0\"}"
-//         );
-
-//         let result = ClientSseTransport::parse_sse_message(sse_message);
-//         assert!(result.is_some(), "Failed to parse real SSE message");
-
-//         // Verify we can parse the message into valid JSON
-//         if let Some(SseEvent::Message(msg)) = result {
-//             let json = serde_json::to_string(&msg).unwrap();
-//             assert!(json.contains("\"description\":\"A powerful web search tool"));
-//         } else {
-//             panic!("Expected Message event");
-//         }
-//     }
-// }

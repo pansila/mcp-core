@@ -49,17 +49,25 @@ async fn main() -> Result<(), anyhow::Error> {
                 move |req: CallToolRequest| {
                     Box::pin(async move {
                         let args = req.arguments.unwrap_or_default();
-                        let data = args
-                            .get("test_data")
-                            .ok_or(anyhow::anyhow!("missing arguments `test_data`"))?;
+                        let data = args.get("test_data");
 
-                        Ok(CallToolResponse {
+                        if data.is_none() {
+                            return CallToolResponse {
+                                content: vec![ToolResponseContent::Text {
+                                    text: "Missing 'test_data' argument".to_string(),
+                                }],
+                                is_error: Some(true),
+                                meta: None,
+                            };
+                        };
+
+                        CallToolResponse {
                             content: vec![ToolResponseContent::Text {
                                 text: json!(data).to_string(),
                             }],
                             is_error: None,
                             meta: None,
-                        })
+                        }
                     })
                 },
             );

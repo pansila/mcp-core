@@ -5,7 +5,8 @@ use crate::{
     transport::Transport,
     types::{
         CallToolRequest, CallToolResponse, ClientCapabilities, Implementation, InitializeRequest,
-        InitializeResponse, ListRequest, ToolsListResponse, LATEST_PROTOCOL_VERSION,
+        InitializeResponse, ListRequest, ReadResourceRequest, Resource, ResourcesListResponse,
+        ToolsListResponse, LATEST_PROTOCOL_VERSION,
     },
 };
 
@@ -146,16 +147,80 @@ impl<T: Transport> Client<T> {
             .map_err(|e| anyhow::anyhow!("Failed to parse response: {}", e))?)
     }
 
-    pub(crate) async fn list_resources() {
-        todo!()
+    pub async fn list_resources(
+        &self,
+        cursor: Option<String>,
+        request_options: Option<RequestOptions>,
+    ) -> Result<ResourcesListResponse> {
+        if self.strict {
+            self.assert_initialized().await?;
+        }
+
+        let list_request = ListRequest { cursor, meta: None };
+
+        let response = self
+            .request(
+                "resources/list",
+                Some(serde_json::to_value(list_request)?),
+                request_options.unwrap_or_else(RequestOptions::default),
+            )
+            .await?;
+
+        Ok(serde_json::from_value(response)
+            .map_err(|e| anyhow::anyhow!("Failed to parse response: {}", e))?)
     }
 
-    pub(crate) async fn read_resource() {
-        todo!()
+    pub async fn read_resource(&self, uri: url::Url) -> Result<Resource> {
+        if self.strict {
+            self.assert_initialized().await?;
+        }
+
+        let read_request = ReadResourceRequest { uri };
+
+        let response = self
+            .request(
+                "resources/read",
+                Some(serde_json::to_value(read_request)?),
+                RequestOptions::default(),
+            )
+            .await?;
+
+        Ok(serde_json::from_value(response)
+            .map_err(|e| anyhow::anyhow!("Failed to parse response: {}", e))?)
     }
 
-    pub(crate) async fn subscribe_to_resource() {
-        todo!()
+    pub async fn subscribe_to_resource(&self, uri: url::Url) -> Result<()> {
+        if self.strict {
+            self.assert_initialized().await?;
+        }
+
+        let subscribe_request = ReadResourceRequest { uri };
+
+        self.request(
+            "resources/subscribe",
+            Some(serde_json::to_value(subscribe_request)?),
+            RequestOptions::default(),
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn unsubscribe_to_resource(&self, uri: url::Url) -> Result<()> {
+        if self.strict {
+            self.assert_initialized().await?;
+        }
+
+        let unsubscribe_request = ReadResourceRequest { uri };
+
+        self.request(
+            "resources/unsubscribe",
+            Some(serde_json::to_value(unsubscribe_request)?),
+            RequestOptions::default(),
+        )
+        .await?;
+
+        Ok(())
     }
 
     pub async fn start(&self) -> Result<()> {

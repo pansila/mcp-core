@@ -1,16 +1,10 @@
 [workspace]
-members = [
-  ".",
-  "examples/client",
-  "examples/file_system",
-  "examples/knowledge_graph_memory",
-  "examples/pingpong",
-]
+members = [".", "examples/client", "examples/file_system", "examples/pingpong"]
 default-members = ["examples/file_system", "examples/pingpong"]
 
 [package]
 name = "mcp-core"
-version = "0.0.92"
+version = "0.0.93"
 edition = "2021"
 description = "A Rust library implementing the Modern Context Protocol (MCP)"
 repository = "https://github.com/stevohuncho/mcp-core"

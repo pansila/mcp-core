@@ -20,7 +20,6 @@ use anyhow::Result;
 use serde::{de::DeserializeOwned, Serialize};
 use std::future::Future;
 use std::pin::Pin;
-use tracing::info;
 
 #[derive(Clone)]
 pub struct ServerState {
@@ -94,7 +93,7 @@ impl<T: Transport> ServerBuilder<T> {
     pub fn register_tool(
         &mut self,
         tool: Tool,
-        f: impl Fn(CallToolRequest) -> Pin<Box<dyn Future<Output = Result<CallToolResponse>> + Send>>
+        f: impl Fn(CallToolRequest) -> Pin<Box<dyn Future<Output = CallToolResponse> + Send>>
             + Send
             + Sync
             + 'static,

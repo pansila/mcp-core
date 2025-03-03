@@ -24,5 +24,5 @@ cargo add mcp_core
 Or add `mcp_core` to your `Cargo.toml` dependencies directly
 ```toml
 [dependencies]
-mcp_core = "0.0.9"
+mcp_core = "0.1.0"
 ```
