@@ -2,9 +2,17 @@ use mcp_core::{
     run_http_server,
     server::Server,
     sse::http_server::Host,
+    tool_response_error, tool_text_response,
     types::{CallToolRequest, CallToolResponse, ServerCapabilities, Tool, ToolResponseContent},
 };
 use serde_json::json;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+enum PostDmError {
+    #[error("Missing data")]
+    MissingData,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -52,22 +60,10 @@ async fn main() -> Result<(), anyhow::Error> {
                         let data = args.get("test_data");
 
                         if data.is_none() {
-                            return CallToolResponse {
-                                content: vec![ToolResponseContent::Text {
-                                    text: "Missing 'test_data' argument".to_string(),
-                                }],
-                                is_error: Some(true),
-                                meta: None,
-                            };
+                            return tool_response_error!(PostDmError::MissingData);
                         };
 
-                        CallToolResponse {
-                            content: vec![ToolResponseContent::Text {
-                                text: json!(data).to_string(),
-                            }],
-                            is_error: None,
-                            meta: None,
-                        }
+                        tool_text_response!(json!(data).to_string())
                     })
                 },
             );

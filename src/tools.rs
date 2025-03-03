@@ -35,7 +35,6 @@ impl Tools {
             .collect()
     }
 }
-
 pub(crate) struct ToolHandler {
     pub tool: Tool,
     pub f: Box<
