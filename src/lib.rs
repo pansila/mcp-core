@@ -8,7 +8,7 @@ pub mod transport;
 pub mod types;
 
 #[macro_export]
-macro_rules! tool_response_error {
+macro_rules! tool_error_response {
     ($e:expr) => {{
         let error_message = $e.to_string();
         CallToolResponse {

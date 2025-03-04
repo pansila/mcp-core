@@ -2,7 +2,7 @@ use mcp_core::{
     run_http_server,
     server::Server,
     sse::http_server::Host,
-    tool_response_error, tool_text_response,
+    tool_error_response, tool_text_response,
     types::{CallToolRequest, CallToolResponse, ServerCapabilities, Tool, ToolResponseContent},
 };
 use serde_json::json;
@@ -60,7 +60,7 @@ async fn main() -> Result<(), anyhow::Error> {
                         let data = args.get("test_data");
 
                         if data.is_none() {
-                            return tool_response_error!(PostDmError::MissingData);
+                            return tool_error_response!(PostDmError::MissingData);
                         };
 
                         tool_text_response!(json!(data).to_string())
