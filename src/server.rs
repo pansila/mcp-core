@@ -4,12 +4,13 @@ use std::{
 };
 
 use crate::{
+    protocol::Protocol,
     tools::{ToolHandler, Tools},
     types::{CallToolRequest, CallToolResponse, ListRequest, Tool, ToolsListResponse},
 };
 
 use super::{
-    protocol::{Protocol, ProtocolBuilder},
+    protocol::ProtocolBuilder,
     transport::Transport,
     types::{
         ClientCapabilities, Implementation, InitializeRequest, InitializeResponse,
@@ -17,39 +18,50 @@ use super::{
     },
 };
 use anyhow::Result;
-use serde::{de::DeserializeOwned, Serialize};
 use std::future::Future;
 use std::pin::Pin;
 
 #[derive(Clone)]
-pub struct ServerState {
+pub struct ClientConnection {
     client_capabilities: Option<ClientCapabilities>,
     client_info: Option<Implementation>,
     initialized: bool,
 }
 
 #[derive(Clone)]
-pub struct Server<T: Transport> {
-    protocol: Protocol<T>,
-    state: Arc<RwLock<ServerState>>,
+pub struct Server;
+
+impl Server {
+    pub fn builder(name: String, version: String) -> ServerProtocolBuilder {
+        ServerProtocolBuilder::new(name, version)
+    }
+
+    pub async fn start<T: Transport>(transport: T) -> Result<()> {
+        transport.open().await
+    }
 }
 
-pub struct ServerBuilder<T: Transport> {
-    protocol: ProtocolBuilder<T>,
+pub struct ServerProtocolBuilder {
+    protocol_builder: ProtocolBuilder,
     server_info: Implementation,
     capabilities: ServerCapabilities,
     tools: HashMap<String, ToolHandler>,
+    client_connection: Arc<RwLock<ClientConnection>>,
 }
 
-impl<T: Transport> ServerBuilder<T> {
-    pub fn name<S: Into<String>>(mut self, name: S) -> Self {
-        self.server_info.name = name.into();
-        self
-    }
-
-    pub fn version<S: Into<String>>(mut self, version: S) -> Self {
-        self.server_info.version = version.into();
-        self
+impl ServerProtocolBuilder {
+    pub fn new(name: String, version: String) -> Self {
+        ServerProtocolBuilder {
+            protocol_builder: ProtocolBuilder::new(),
+            server_info: Implementation { name, version },
+            capabilities: ServerCapabilities::default(),
+            tools: HashMap::new(),
+            client_connection: Arc::new(RwLock::new(ClientConnection {
+                client_capabilities: None,
+                client_info: None,
+                initialized: false,
+            })),
+        }
     }
 
     pub fn capabilities(mut self, capabilities: ServerCapabilities) -> Self {
@@ -57,47 +69,14 @@ impl<T: Transport> ServerBuilder<T> {
         self
     }
 
-    /// Register a typed request handler
-    /// for higher-level api use add tool
-    pub fn request_handler<Req, Resp>(
-        mut self,
-        method: &str,
-        handler: impl Fn(Req) -> Pin<Box<dyn std::future::Future<Output = Result<Resp>> + Send>>
-            + Send
-            + Sync
-            + 'static,
-    ) -> Self
-    where
-        Req: DeserializeOwned + Send + Sync + 'static,
-        Resp: Serialize + Send + Sync + 'static,
-    {
-        self.protocol = self.protocol.request_handler(method, handler);
-        self
-    }
-
-    pub fn notification_handler<N>(
-        mut self,
-        method: &str,
-        handler: impl Fn(N) -> Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>
-            + Send
-            + Sync
-            + 'static,
-    ) -> Self
-    where
-        N: DeserializeOwned + Send + Sync + 'static,
-    {
-        self.protocol = self.protocol.notification_handler(method, handler);
-        self
-    }
-
     pub fn register_tool(
-        &mut self,
+        mut self,
         tool: Tool,
         f: impl Fn(CallToolRequest) -> Pin<Box<dyn Future<Output = CallToolResponse> + Send>>
             + Send
             + Sync
             + 'static,
-    ) {
+    ) -> Self {
         self.tools.insert(
             tool.name.clone(),
             ToolHandler {
@@ -105,78 +84,12 @@ impl<T: Transport> ServerBuilder<T> {
                 f: Box::new(f),
             },
         );
-    }
-
-    pub fn build(self) -> Server<T> {
-        Server::new(self)
-    }
-}
-
-impl<T: Transport> Server<T> {
-    pub fn builder(transport: T) -> ServerBuilder<T> {
-        ServerBuilder {
-            protocol: Protocol::builder(transport),
-            server_info: Implementation {
-                name: env!("CARGO_PKG_NAME").to_string(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-            },
-            capabilities: Default::default(),
-            tools: HashMap::new(),
-        }
-    }
-
-    fn new(builder: ServerBuilder<T>) -> Self {
-        let state = Arc::new(RwLock::new(ServerState {
-            client_capabilities: None,
-            client_info: None,
-            initialized: false,
-        }));
-
-        // Initialize protocol with handlers
-        let mut protocol = builder
-            .protocol
-            .request_handler(
-                "initialize",
-                Self::handle_init(state.clone(), builder.server_info, builder.capabilities),
-            )
-            .notification_handler(
-                "notifications/initialized",
-                Self::handle_initialized(state.clone()),
-            );
-
-        // Add tools handlers if not already present
-        if !protocol.has_request_handler("tools/list") {
-            let tools = Arc::new(Tools::new(builder.tools));
-            let tools_clone = tools.clone();
-            let tools_list = tools.clone();
-            let tools_call = tools_clone.clone();
-
-            protocol = protocol
-                .request_handler("tools/list", move |_req: ListRequest| {
-                    let tools = tools_list.clone();
-                    Box::pin(async move {
-                        Ok(ToolsListResponse {
-                            tools: tools.list_tools(),
-                            next_cursor: None,
-                            meta: None,
-                        })
-                    })
-                })
-                .request_handler("tools/call", move |req: CallToolRequest| {
-                    let tools = tools_call.clone();
-                    Box::pin(async move { tools.call_tool(req).await })
-                });
-        }
-
-        Server {
-            protocol: protocol.build(),
-            state,
-        }
+        self
     }
 
     // Helper function for initialize handler
     fn handle_init(
-        state: Arc<RwLock<ServerState>>,
+        state: Arc<RwLock<ClientConnection>>,
         server_info: Implementation,
         capabilities: ServerCapabilities,
     ) -> impl Fn(
@@ -206,7 +119,7 @@ impl<T: Transport> Server<T> {
 
     // Helper function for initialized handler
     fn handle_initialized(
-        state: Arc<RwLock<ServerState>>,
+        state: Arc<RwLock<ClientConnection>>,
     ) -> impl Fn(()) -> Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> {
         move |_| {
             let state = state.clone();
@@ -221,22 +134,87 @@ impl<T: Transport> Server<T> {
     }
 
     pub fn get_client_capabilities(&self) -> Option<ClientCapabilities> {
-        self.state.read().ok()?.client_capabilities.clone()
+        self.client_connection
+            .read()
+            .ok()?
+            .client_capabilities
+            .clone()
     }
 
     pub fn get_client_info(&self) -> Option<Implementation> {
-        self.state.read().ok()?.client_info.clone()
+        self.client_connection.read().ok()?.client_info.clone()
     }
 
     pub fn is_initialized(&self) -> bool {
-        self.state
+        self.client_connection
             .read()
             .ok()
-            .map(|state| state.initialized)
+            .map(|client_connection| client_connection.initialized)
             .unwrap_or(false)
     }
 
-    pub async fn listen(&self) -> Result<()> {
-        self.protocol.listen().await
+    pub fn build(self) -> Protocol {
+        let tools = Arc::new(Tools::new(self.tools));
+        let tools_clone = tools.clone();
+        let tools_list = tools.clone();
+        let tools_call = tools_clone.clone();
+
+        let conn_for_list = self.client_connection.clone();
+        let conn_for_call = self.client_connection.clone();
+
+        self.protocol_builder
+            .request_handler(
+                "initialize",
+                Self::handle_init(
+                    self.client_connection.clone(),
+                    self.server_info,
+                    self.capabilities,
+                ),
+            )
+            .notification_handler(
+                "notifications/initialized",
+                Self::handle_initialized(self.client_connection.clone()),
+            )
+            .request_handler("tools/list", move |_req: ListRequest| {
+                let tools = tools_list.clone();
+                let conn = conn_for_list.clone();
+
+                Box::pin(async move {
+                    let client_state = conn.read().map_err(|_| anyhow::anyhow!("Lock poisoned"))?;
+
+                    if !client_state.initialized {
+                        return Err(anyhow::anyhow!(
+                            "Client must be initialized before using tools/list"
+                        ));
+                    }
+
+                    Ok(ToolsListResponse {
+                        tools: tools.list_tools(),
+                        next_cursor: None,
+                        meta: None,
+                    })
+                })
+            })
+            .request_handler("tools/call", move |req: CallToolRequest| {
+                let tools = tools_call.clone();
+                let conn = conn_for_call.clone();
+
+                Box::pin(async move {
+                    {
+                        // Check if client is initialized
+                        let client_state =
+                            conn.read().map_err(|_| anyhow::anyhow!("Lock poisoned"))?;
+
+                        if !client_state.initialized {
+                            return Err(anyhow::anyhow!(
+                                "Client must be initialized before using tools/call"
+                            ));
+                        }
+                    }
+
+                    tools.call_tool(req).await
+                })
+            })
+            .build()
     }
 }

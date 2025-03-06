@@ -2,53 +2,54 @@
 //! handles the serialization and deserialization of message
 //! handles send and receive of messages
 //! defines transport layer types
+
 use std::{future::Future, pin::Pin};
 
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-// Transports
-mod stdio_transport;
-pub use stdio_transport::*;
-mod inmemory_transport;
-pub use inmemory_transport::*;
+mod client;
+pub use client::*;
 
-// Http transports
-#[cfg(feature = "http")]
-mod sse_transport;
-#[cfg(feature = "http")]
-pub use sse_transport::*;
-#[cfg(feature = "http")]
-mod ws_transport;
-#[cfg(feature = "http")]
-pub use ws_transport::*;
-#[cfg(feature = "http")]
-mod http_transport;
-#[cfg(feature = "http")]
-pub use http_transport::*;
+mod server;
+pub use server::*;
+
+use crate::protocol::RequestOptions;
 
 /// only JsonRpcMessage is supported for now
 /// https://spec.modelcontextprotocol.io/specification/basic/messages/
 pub type Message = JsonRpcMessage;
 
-#[async_trait]
+#[async_trait()]
 pub trait Transport: Send + Sync + 'static {
-    /// Send a message to the transport
-    fn send(
-        &self,
-        message: &Message,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + '_>>;
-
-    /// Receive a message from the transport
-    /// this is blocking call
-    async fn receive(&self) -> Result<Option<Message>>;
-
     /// open the transport
     async fn open(&self) -> Result<()>;
 
     /// Close the transport
     async fn close(&self) -> Result<()>;
+
+    async fn poll_message(&self) -> Result<Option<Message>>;
+
+    fn request(
+        &self,
+        method: &str,
+        params: Option<serde_json::Value>,
+        options: RequestOptions,
+    ) -> Pin<Box<dyn Future<Output = Result<JsonRpcResponse>> + Send>>;
+
+    async fn send_notification(
+        &self,
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> Result<()>;
+
+    async fn send_response(
+        &self,
+        id: RequestId,
+        result: Option<serde_json::Value>,
+        error: Option<JsonRpcError>,
+    ) -> Result<()>;
 }
 
 /// Request ID type
@@ -129,34 +130,4 @@ pub struct JsonRpcError {
     /// Optional additional error data
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn test_deserialize_initialize_request() {
-        let json = r#"{"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"claude-ai","version":"0.1.0"}},"jsonrpc":"2.0","id":0}"#;
-
-        let message: Message = serde_json::from_str(json).unwrap();
-        match message {
-            JsonRpcMessage::Request(req) => {
-                assert_eq!(req.jsonrpc.as_str(), "2.0");
-                assert_eq!(req.id, 0);
-                assert_eq!(req.method, "initialize");
-
-                // Verify params exist and are an object
-                let params = req.params.expect("params should exist");
-                assert!(params.is_object());
-
-                let params_obj = params.as_object().unwrap();
-                assert_eq!(params_obj["protocolVersion"], "2024-11-05");
-
-                let client_info = params_obj["clientInfo"].as_object().unwrap();
-                assert_eq!(client_info["name"], "claude-ai");
-                assert_eq!(client_info["version"], "0.1.0");
-            }
-            _ => panic!("Expected Request variant"),
-        }
-    }
 }

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, env, sync::Arc};
 
 use crate::{
-    protocol::{Protocol, ProtocolBuilder, RequestOptions},
+    protocol::RequestOptions,
     transport::Transport,
     types::{
         CallToolRequest, CallToolResponse, ClientCapabilities, Implementation, InitializeRequest,
@@ -17,7 +17,7 @@ use tracing::debug;
 
 #[derive(Clone)]
 pub struct Client<T: Transport> {
-    protocol: Arc<Protocol<T>>,
+    transport: T,
     strict: bool,
     initialize_res: Arc<RwLock<Option<InitializeResponse>>>,
     env: Option<HashMap<String, SecureValue>>,
@@ -28,10 +28,18 @@ impl<T: Transport> Client<T> {
         ClientBuilder::new(transport)
     }
 
-    pub async fn initialize(&self, client_info: Implementation) -> Result<InitializeResponse> {
+    pub async fn open(&self) -> Result<()> {
+        self.transport.open().await
+    }
+
+    pub async fn initialize(
+        &self,
+        client_info: Implementation,
+        capabilities: ClientCapabilities,
+    ) -> Result<InitializeResponse> {
         let request = InitializeRequest {
             protocol_version: LATEST_PROTOCOL_VERSION.to_string(),
-            capabilities: ClientCapabilities::default(),
+            capabilities,
             client_info,
         };
         let response = self
@@ -59,8 +67,8 @@ impl<T: Transport> Client<T> {
             "Initialized with protocol version: {}",
             response.protocol_version
         );
-        self.protocol
-            .notify("notifications/initialized", None)
+        self.transport
+            .send_notification("notifications/initialized", None)
             .await?;
 
         Ok(response)
@@ -80,7 +88,7 @@ impl<T: Transport> Client<T> {
         params: Option<serde_json::Value>,
         options: RequestOptions,
     ) -> Result<serde_json::Value> {
-        let response = self.protocol.request(method, params, options).await?;
+        let response = self.transport.request(method, params, options).await?;
         response
             .result
             .ok_or_else(|| anyhow::anyhow!("Request failed: {:?}", response.error))
@@ -231,7 +239,7 @@ pub enum SecureValue {
 }
 
 pub struct ClientBuilder<T: Transport> {
-    protocol: ProtocolBuilder<T>,
+    transport: T,
     strict: bool,
     env: Option<HashMap<String, SecureValue>>,
 }
@@ -239,7 +247,7 @@ pub struct ClientBuilder<T: Transport> {
 impl<T: Transport> ClientBuilder<T> {
     pub fn new(transport: T) -> Self {
         Self {
-            protocol: ProtocolBuilder::new(transport),
+            transport,
             strict: false,
             env: None,
         }
@@ -270,12 +278,8 @@ impl<T: Transport> ClientBuilder<T> {
     }
 
     pub fn build(self) -> Client<T> {
-        let protocol = Arc::new(self.protocol.build());
-        let protocol_clone = protocol.clone();
-        tokio::spawn(async move { protocol_clone.listen().await });
-
         Client {
-            protocol,
+            transport: self.transport,
             strict: self.strict,
             env: self.env,
             initialize_res: Arc::new(RwLock::new(None)),

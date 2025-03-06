@@ -36,112 +36,163 @@ cargo add mcp-core
 Or add `mcp-core` to your `Cargo.toml` dependencies directly
 ```toml
 [dependencies]
-mcp-core = "0.1.1"
+mcp-core = "0.1.3"
 ```
 
 ## Server Implementation
-Easily start your own local SSE MCP Servers with tooling capabilities. To use SSE functionality, make sure to enable the "http" feature in your Cargo.toml `mcp-core = { version = "0.1.1", features = ["http"] }`
+Easily start your own local SSE MCP Servers with tooling capabilities. To use SSE functionality, make sure to enable the "http" feature in your Cargo.toml `mcp-core = { version = "0.1.3", features = ["sse_server"] }`
 ```rs
-sse-server.rs
+mod ping;
+use anyhow::Result;
+use clap::{Parser, ValueEnum};
 use mcp_core::{
-    run_http_server,
     server::Server,
-    tool_error_response, tool_text_response,
-    types::{CallToolRequest, CallToolResponse, ServerCapabilities, Tool, ToolResponseContent},
+    transport::{ServerSseTransport, ServerStdioTransport},
+    types::ServerCapabilities,
 };
 use serde_json::json;
-use thiserror::Error;
 
-#[derive(Debug, Error)]
-enum TestError {
-    #[error("Missing data")]
-    MissingData,
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// Transport type to use
+    #[arg(value_enum, default_value_t = TransportType::Sse)]
+    transport: TransportType,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
+enum TransportType {
+    Stdio,
+    Sse,
 }
 
 #[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        // needs to be stderr due to stdio transport
+        .with_writer(std::io::stderr)
+        .init();
+
+    let cli = Cli::parse();
+
+    let server_protocol = Server::builder("pingpong".to_string(), "1.0".to_string())
+        .capabilities(ServerCapabilities {
+            tools: Some(json!({
+                "listChanged": false,
+            })),
+            ..Default::default()
+        })
+        .register_tool(ping::PingTool::tool(), ping::PingTool::call().await)
+        .build();
+
+    match cli.transport {
+        TransportType::Stdio => {
+            let transport = ServerStdioTransport::new(server_protocol);
+            Server::start(transport).await
+        }
+        TransportType::Sse => {
+            let transport = ServerSseTransport::new("127.0.0.1".to_string(), 3000, server_protocol);
+            Server::start(transport).await
+        }
+    }
+}
+```
+
+## SSE Client Connection
+Connect to an SSE MCP Server using the `ClientSseTransport`. Here is an example of connecting to one and listing the tools from that server.
+```rs
+use std::time::Duration;
+
+use anyhow::Result;
+use clap::{Parser, ValueEnum};
+use mcp_core::{
+    client::ClientBuilder,
+    protocol::RequestOptions,
+    transport::{ClientSseTransportBuilder, ClientStdioTransport},
+    types::{ClientCapabilities, Implementation},
+};
+use serde_json::json;
+use tracing::info;
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// Transport type to use
+    #[arg(value_enum, default_value_t = TransportType::Sse)]
+    transport: TransportType,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
+enum TransportType {
+    Stdio,
+    Sse,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
         .with_writer(std::io::stderr)
         .init();
 
-    run_http_server(
-        "127.0.0.1".to_string(),
-        port: 8080,
-        None,
-        |transport| async move {
-            let mut server_builder = Server::builder(transport)
-                .capabilities(ServerCapabilities {
-                    tools: Some(json!({
-                        "listChanged": false,
-                    })),
-                    ..ServerCapabilities::default()
-                })
-                .version("0.1.0")
-                .name("Example SSE Server");
+    let cli = Cli::parse();
 
-            server_builder.register_tool(
-                Tool {
-                    name: "test".to_string(),
-                    description: Some("Test Tool".to_string()),
-                    input_schema: json!({
-                       "type":"object",
-                       "properties":{
-                          "test_data":{
-                             "type": "string",
-                             "description": "Test data",
-                          }
-                       },
-                       "required":["test_data"]
-                    }),
-                },
-                move |req: CallToolRequest| {
-                    Box::pin(async move {
-                        let args = req.arguments.unwrap_or_default();
-                        let data = args.get("test_data");
+    let response = match cli.transport {
+        TransportType::Stdio => {
+            // Build the server first
+            // cargo build --bin pingpong_server
+            let transport = ClientStdioTransport::new("./target/debug/pingpong_server", &[])?;
+            let client = ClientBuilder::new(transport.clone()).build();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            client.open().await?;
 
-                        if data.is_none() {
-                            return tool_error_response!(TestError::MissingData);
-                        };
+            client
+                .initialize(
+                    Implementation {
+                        name: "pingpong".to_string(),
+                        version: "1.0".to_string(),
+                    },
+                    ClientCapabilities::default(),
+                )
+                .await?;
 
-                        tool_text_response!(json!(data).to_string())
-                    })
-                },
-            );
+            client
+                .request(
+                    "tools/call",
+                    Some(json!({"name": "ping", "arguments": {}})),
+                    RequestOptions::default().timeout(Duration::from_secs(5)),
+                )
+                .await?
+        }
+        TransportType::Sse => {
+            let client = ClientBuilder::new(
+                ClientSseTransportBuilder::new("http://localhost:3000".to_string()).build(),
+            )
+            .build();
+            client.open().await?;
 
-            Ok(server_builder.build())
-        },
-    )
-    .await?;
+            client
+                .initialize(
+                    Implementation {
+                        name: "pingpong".to_string(),
+                        version: "1.0".to_string(),
+                    },
+                    ClientCapabilities::default(),
+                )
+                .await?;
 
+            client
+                .request(
+                    "tools/call",
+                    Some(json!({"name": "ping", "arguments": {}})),
+                    RequestOptions::default().timeout(Duration::from_secs(5)),
+                )
+                .await?
+        }
+    };
+    info!("response: {response}");
     Ok(())
 }
-```
-### SSE Server Authentication
-Client connections are authenticated using **JWT** middleware via `mcp_core::sse::middleware`. Enable this by setting the `auth_config` of your server to include the secret to verify claims.
-```rs
-pub struct AuthConfig {
-    pub jwt_secret: String,
-}
-```
-## SSE Client Connection
-Connect to an SSE MCP Server using the `ClientSseTransport`. Here is an example of connecting to one and listing the tools from that server.
-```rs
-let transport = ClientSseTransport::builder("https://my.mcpdomain.com".to_string()).build();
-transport.open().await?;
-
-let mcp_client = McpClient::builder(transport).use_strict().build();
-
-mcp_client
-    .initialize(Implementation {
-        name: "mcp-client".to_string(),
-        version: "0.1.0".to_string(),
-    })
-    .await?;
-
-let tools = mcp_client.list_tools(None, None).await?.tools;
-
-println!("Tools: {:?}", tools);
 ```
 
 ### Setting `SecureValues` to your SSE MCP Client

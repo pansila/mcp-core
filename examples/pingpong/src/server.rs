@@ -1,63 +1,55 @@
+mod ping;
 use anyhow::Result;
-use mcp_core::server::Server;
-use mcp_core::transport::Transport;
-use mcp_core::types::{
-    CallToolRequest, CallToolResponse, ListRequest, ResourcesListResponse, ServerCapabilities,
-    ToolResponseContent, ToolsListResponse,
+use clap::{Parser, ValueEnum};
+use mcp_core::{
+    server::Server,
+    transport::{ServerSseTransport, ServerStdioTransport},
+    types::ServerCapabilities,
 };
 use serde_json::json;
 
-pub fn build_server<T: Transport>(t: T) -> Server<T> {
-    Server::builder(t)
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// Transport type to use
+    #[arg(value_enum, default_value_t = TransportType::Sse)]
+    transport: TransportType,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
+enum TransportType {
+    Stdio,
+    Sse,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        // needs to be stderr due to stdio transport
+        .with_writer(std::io::stderr)
+        .init();
+
+    let cli = Cli::parse();
+
+    let server_protocol = Server::builder("pingpong".to_string(), "1.0".to_string())
         .capabilities(ServerCapabilities {
-            tools: Some(json!({})),
+            tools: Some(json!({
+                "listChanged": false,
+            })),
             ..Default::default()
         })
-        .request_handler("tools/list", |req: ListRequest| {
-            Box::pin(async move { list_tools(req) })
-        })
-        .request_handler("tools/call", |req: CallToolRequest| {
-            Box::pin(async move { call_tool(req) })
-        })
-        .request_handler("resources/list", |_req: ListRequest| {
-            Box::pin(async move {
-                Ok(ResourcesListResponse {
-                    resources: vec![],
-                    next_cursor: None,
-                    meta: None,
-                })
-            })
-        })
-        .build()
-}
+        .register_tool(ping::PingTool::tool(), ping::PingTool::call().await)
+        .build();
 
-fn list_tools(_req: ListRequest) -> Result<ToolsListResponse> {
-    let response = json!({
-    "tools": [
-      {
-        "name": "ping",
-        "description": "Send a ping to get a pong response",
-        "inputSchema": {
-          "type": "object",
-          "properties": {},
-          "required": []
-        },
-      },
-    ]});
-    Ok(serde_json::from_value(response)?)
-}
-
-fn call_tool(req: CallToolRequest) -> Result<CallToolResponse> {
-    let name = req.name.as_str();
-    let result = match name {
-        "ping" => ToolResponseContent::Text {
-            text: "pong".to_string(),
-        },
-        _ => return Err(anyhow::anyhow!("Unknown tool: {}", req.name)),
-    };
-    Ok(CallToolResponse {
-        content: vec![result],
-        is_error: None,
-        meta: None,
-    })
+    match cli.transport {
+        TransportType::Stdio => {
+            let transport = ServerStdioTransport::new(server_protocol);
+            Server::start(transport).await
+        }
+        TransportType::Sse => {
+            let transport = ServerSseTransport::new("127.0.0.1".to_string(), 3000, server_protocol);
+            Server::start(transport).await
+        }
+    }
 }

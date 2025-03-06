@@ -1,10 +1,6 @@
 pub mod client;
 pub mod protocol;
 pub mod server;
-#[cfg(feature = "http")]
-pub mod sse;
-#[cfg(feature = "http")]
-pub use sse::http_server::run_http_server;
 pub mod tools;
 pub mod transport;
 pub mod types;

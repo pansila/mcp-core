@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-mcp-core = { path = "../..", features = ["http"] }
+mcp-core = { path = "../..", features = ["sse_server"] }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -15,8 +15,8 @@ home = "0.5.9"
 clap = { version = "4.4", features = ["derive"] }
 
 [[bin]]
-name = "pingpong"
-path = "./src/main.rs"
+name = "pingpong_server"
+path = "./src/server.rs"
 
 [[bin]]
 name = "pingpong_client"

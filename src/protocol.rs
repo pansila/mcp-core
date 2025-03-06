@@ -1,167 +1,108 @@
-use super::transport::{
-    JsonRpcError, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, Message,
-    Transport,
-};
+use super::transport::{JsonRpcError, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 use super::types::ErrorCode;
-use anyhow::anyhow;
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::pin::Pin;
-use std::sync::atomic::Ordering;
+
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use std::{
-    collections::HashMap,
-    sync::{atomic::AtomicU64, Arc},
-};
-use tokio::sync::oneshot;
-use tokio::sync::Mutex;
-use tokio::time::timeout;
-use tracing::debug;
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::{oneshot, Mutex};
 
 #[derive(Clone)]
-pub struct Protocol<T: Transport> {
-    transport: Arc<T>,
-
+pub struct Protocol {
     request_id: Arc<AtomicU64>,
     pending_requests: Arc<Mutex<HashMap<u64, oneshot::Sender<JsonRpcResponse>>>>,
     request_handlers: Arc<Mutex<HashMap<String, Box<dyn RequestHandler>>>>,
     notification_handlers: Arc<Mutex<HashMap<String, Box<dyn NotificationHandler>>>>,
 }
 
-impl<T: Transport> Protocol<T> {
-    pub fn builder(transport: T) -> ProtocolBuilder<T> {
-        ProtocolBuilder::new(transport)
+impl Protocol {
+    pub fn builder() -> ProtocolBuilder {
+        ProtocolBuilder::new()
     }
 
-    pub async fn notify(&self, method: &str, params: Option<serde_json::Value>) -> Result<()> {
-        let notification = JsonRpcNotification {
-            method: method.to_string(),
-            params,
-            ..Default::default()
-        };
-        let msg = JsonRpcMessage::Notification(notification);
-        self.transport.send(&msg).await?;
-        Ok(())
+    pub async fn handle_request(&self, request: JsonRpcRequest) -> JsonRpcResponse {
+        let handlers = self.request_handlers.lock().await;
+        if let Some(handler) = handlers.get(&request.method) {
+            match handler.handle(request.clone()).await {
+                Ok(response) => response,
+                Err(e) => JsonRpcResponse {
+                    id: request.id,
+                    result: None,
+                    error: Some(JsonRpcError {
+                        code: ErrorCode::InternalError as i32,
+                        message: e.to_string(),
+                        data: None,
+                    }),
+                    ..Default::default()
+                },
+            }
+        } else {
+            JsonRpcResponse {
+                id: request.id,
+                error: Some(JsonRpcError {
+                    code: ErrorCode::MethodNotFound as i32,
+                    message: format!("Method not found: {}", request.method),
+                    data: None,
+                }),
+                ..Default::default()
+            }
+        }
     }
 
-    pub async fn request(
-        &self,
-        method: &str,
-        params: Option<serde_json::Value>,
-        options: RequestOptions,
-    ) -> Result<JsonRpcResponse> {
+    pub async fn handle_notification(&self, request: JsonRpcNotification) {
+        let handlers = self.notification_handlers.lock().await;
+        if let Some(handler) = handlers.get(&request.method) {
+            match handler.handle(request.clone()).await {
+                Ok(_) => tracing::info!("Received notification: {:?}", request.method),
+                Err(e) => tracing::error!("Error handling notification: {}", e),
+            }
+        } else {
+            tracing::debug!("No handler for notification: {}", request.method);
+        }
+    }
+
+    pub async fn create_request(&self) -> (u64, oneshot::Receiver<JsonRpcResponse>) {
         let id = self.request_id.fetch_add(1, Ordering::SeqCst);
-
-        // Create a oneshot channel for this request
         let (tx, rx) = oneshot::channel();
 
-        // Store the sender
         {
             let mut pending = self.pending_requests.lock().await;
             pending.insert(id, tx);
         }
 
-        // Send the request
-        let msg = JsonRpcMessage::Request(JsonRpcRequest {
-            id,
-            method: method.to_string(),
-            params,
-            ..Default::default()
-        });
+        (id, rx)
+    }
 
-        self.transport.send(&msg).await?;
-
-        // Wait for response with timeout
-        match timeout(options.timeout, rx)
-            .await
-            .map_err(|_| anyhow!("Request timed out"))?
-        {
-            Ok(response) => Ok(response),
-            Err(_) => {
-                // Clean up the pending request if receiver was dropped
-                let mut pending = self.pending_requests.lock().await;
-                pending.remove(&id);
-                Err(anyhow!("Request cancelled"))
-            }
+    pub async fn handle_response(&self, response: JsonRpcResponse) {
+        if let Some(tx) = self.pending_requests.lock().await.remove(&response.id) {
+            let _ = tx.send(response);
         }
     }
 
-    pub async fn listen(&self) -> Result<()> {
-        debug!("Listening for requests");
-        loop {
-            let message: Option<Message> = self.transport.receive().await?;
-
-            // Exit loop when transport signals shutdown with None
-            if message.is_none() {
-                break;
-            }
-
-            match message.unwrap() {
-                JsonRpcMessage::Request(request) => self.handle_request(request).await?,
-                JsonRpcMessage::Response(response) => {
-                    let id = response.id;
-                    let mut pending = self.pending_requests.lock().await;
-                    if let Some(tx) = pending.remove(&id) {
-                        let _ = tx.send(response);
-                    }
-                }
-                JsonRpcMessage::Notification(notification) => {
-                    let handlers = self.notification_handlers.lock().await;
-                    if let Some(handler) = handlers.get(&notification.method) {
-                        handler.handle(notification).await?;
-                    }
-                }
-            }
+    pub async fn cancel_response(&self, id: u64) {
+        if let Some(tx) = self.pending_requests.lock().await.remove(&id) {
+            let _ = tx.send(JsonRpcResponse {
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: ErrorCode::RequestTimeout as i32,
+                    message: "Request cancelled".to_string(),
+                    data: None,
+                }),
+                ..Default::default()
+            });
         }
-        Ok(())
-    }
-
-    async fn handle_request(&self, request: JsonRpcRequest) -> Result<()> {
-        let handlers = self.request_handlers.lock().await;
-        if let Some(handler) = handlers.get(&request.method) {
-            match handler.handle(request.clone()).await {
-                Ok(response) => {
-                    let msg = JsonRpcMessage::Response(response);
-                    self.transport.send(&msg).await?;
-                }
-                Err(e) => {
-                    let error_response = JsonRpcResponse {
-                        id: request.id,
-                        result: None,
-                        error: Some(JsonRpcError {
-                            code: ErrorCode::InternalError as i32,
-                            message: e.to_string(),
-                            data: None,
-                        }),
-                        ..Default::default()
-                    };
-                    let msg = JsonRpcMessage::Response(error_response);
-                    self.transport.send(&msg).await?;
-                }
-            }
-        } else {
-            self.transport
-                .send(&JsonRpcMessage::Response(JsonRpcResponse {
-                    id: request.id,
-                    error: Some(JsonRpcError {
-                        code: ErrorCode::MethodNotFound as i32,
-                        message: format!("Method not found: {}", request.method),
-                        data: None,
-                    }),
-                    ..Default::default()
-                }))
-                .await?;
-        }
-        Ok(())
     }
 }
 
 /// The default request timeout, in milliseconds
 pub const DEFAULT_REQUEST_TIMEOUT_MSEC: u64 = 60000;
 pub struct RequestOptions {
-    timeout: Duration,
+    pub timeout: Duration,
 }
 
 impl RequestOptions {
@@ -178,22 +119,23 @@ impl Default for RequestOptions {
     }
 }
 
-pub struct ProtocolBuilder<T: Transport> {
-    transport: T,
-    request_handlers: HashMap<String, Box<dyn RequestHandler>>,
-    notification_handlers: HashMap<String, Box<dyn NotificationHandler>>,
+#[derive(Clone)]
+pub struct ProtocolBuilder {
+    request_handlers: Arc<Mutex<HashMap<String, Box<dyn RequestHandler>>>>,
+    notification_handlers: Arc<Mutex<HashMap<String, Box<dyn NotificationHandler>>>>,
 }
-impl<T: Transport> ProtocolBuilder<T> {
-    pub fn new(transport: T) -> Self {
+
+impl ProtocolBuilder {
+    pub fn new() -> Self {
         Self {
-            transport,
-            request_handlers: HashMap::new(),
-            notification_handlers: HashMap::new(),
+            request_handlers: Arc::new(Mutex::new(HashMap::new())),
+            notification_handlers: Arc::new(Mutex::new(HashMap::new())),
         }
     }
+
     /// Register a typed request handler
     pub fn request_handler<Req, Resp>(
-        mut self,
+        self,
         method: &str,
         handler: impl Fn(Req) -> Pin<Box<dyn std::future::Future<Output = Result<Resp>> + Send>>
             + Send
@@ -209,17 +151,21 @@ impl<T: Transport> ProtocolBuilder<T> {
             _phantom: std::marker::PhantomData,
         };
 
-        self.request_handlers
-            .insert(method.to_string(), Box::new(handler));
+        if let Ok(mut handlers) = self.request_handlers.try_lock() {
+            handlers.insert(method.to_string(), Box::new(handler));
+        }
         self
     }
 
     pub fn has_request_handler(&self, method: &str) -> bool {
-        self.request_handlers.contains_key(method)
+        self.request_handlers
+            .try_lock()
+            .map(|handlers| handlers.contains_key(method))
+            .unwrap_or(false)
     }
 
     pub fn notification_handler<N>(
-        mut self,
+        self,
         method: &str,
         handler: impl Fn(N) -> Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>
             + Send
@@ -229,23 +175,30 @@ impl<T: Transport> ProtocolBuilder<T> {
     where
         N: DeserializeOwned + Send + Sync + 'static,
     {
-        self.notification_handlers.insert(
-            method.to_string(),
-            Box::new(TypedNotificationHandler {
-                handler: Box::new(handler),
-                _phantom: std::marker::PhantomData,
-            }),
-        );
+        let handler = TypedNotificationHandler {
+            handler: Box::new(handler),
+            _phantom: std::marker::PhantomData,
+        };
+
+        if let Ok(mut handlers) = self.notification_handlers.try_lock() {
+            handlers.insert(method.to_string(), Box::new(handler));
+        }
         self
     }
 
-    pub fn build(self) -> Protocol<T> {
+    pub fn has_notification_handler(&self, method: &str) -> bool {
+        self.notification_handlers
+            .try_lock()
+            .map(|handlers| handlers.contains_key(method))
+            .unwrap_or(false)
+    }
+
+    pub fn build(self) -> Protocol {
         Protocol {
-            transport: Arc::new(self.transport),
-            request_handlers: Arc::new(Mutex::new(self.request_handlers)),
-            notification_handlers: Arc::new(Mutex::new(self.notification_handlers)),
             request_id: Arc::new(AtomicU64::new(0)),
             pending_requests: Arc::new(Mutex::new(HashMap::new())),
+            request_handlers: self.request_handlers,
+            notification_handlers: self.notification_handlers,
         }
     }
 }
