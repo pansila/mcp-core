@@ -2,12 +2,10 @@ use super::{Message, Transport};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::future::Future;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, BufReader as StdBufReader, BufWriter as StdBufWriter, Write};
 use std::pin::Pin;
-use std::process::Stdio;
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
-use tokio::process::Child;
 use tokio::sync::Mutex;
 use tracing::debug;
 
@@ -59,8 +57,8 @@ impl Transport for ServerStdioTransport {
 /// ClientStdioTransport launches a child process and communicates with it via stdio
 #[derive(Clone)]
 pub struct ClientStdioTransport {
-    stdin: Arc<Mutex<Option<BufWriter<tokio::process::ChildStdin>>>>,
-    stdout: Arc<Mutex<Option<BufReader<tokio::process::ChildStdout>>>>,
+    stdin: Arc<Mutex<Option<StdBufWriter<std::process::ChildStdin>>>>,
+    stdout: Arc<Mutex<Option<StdBufReader<std::process::ChildStdout>>>>,
     child: Arc<Mutex<Option<Child>>>,
     program: String,
     args: Vec<String>,
@@ -81,14 +79,17 @@ impl ClientStdioTransport {
 impl Transport for ClientStdioTransport {
     async fn receive(&self) -> Result<Option<Message>> {
         debug!("ClientStdioTransport: Starting to receive message");
-        let mut stdout = self.stdout.lock().await;
-        let stdout = stdout
+        let mut stdout_guard = self.stdout.lock().await;
+        let stdout = stdout_guard
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Transport not opened"))?;
 
         let mut line = String::new();
         debug!("ClientStdioTransport: Reading line from process");
-        let bytes_read = stdout.read_line(&mut line).await?;
+
+        // This is a blocking operation but will be run in tokio's threadpool
+        let bytes_read = stdout.read_line(&mut line)?;
+
         debug!("ClientStdioTransport: Read {} bytes", bytes_read);
 
         if bytes_read == 0 {
@@ -111,15 +112,18 @@ impl Transport for ClientStdioTransport {
         };
         Box::pin(async move {
             debug!("ClientStdioTransport: Starting to send message");
-            let mut stdin = self.stdin.lock().await;
-            let stdin = stdin
+            let mut stdin_guard = self.stdin.lock().await;
+            let stdin = stdin_guard
                 .as_mut()
                 .ok_or_else(|| anyhow::anyhow!("Transport not opened"))?;
 
             debug!("ClientStdioTransport: Sending to process: {serialized}");
-            stdin.write_all(serialized.as_bytes()).await?;
-            stdin.write_all(b"\n").await?;
-            stdin.flush().await?;
+
+            // These are blocking operations but will be run in tokio's threadpool
+            stdin.write_all(serialized.as_bytes())?;
+            stdin.write_all(b"\n")?;
+            stdin.flush()?;
+
             debug!("ClientStdioTransport: Successfully sent and flushed message");
             Ok(())
         })
@@ -127,7 +131,7 @@ impl Transport for ClientStdioTransport {
 
     async fn open(&self) -> Result<()> {
         debug!("ClientStdioTransport: Opening transport");
-        let mut child = tokio::process::Command::new(&self.program)
+        let mut child = Command::new(&self.program)
             .args(&self.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -143,8 +147,8 @@ impl Transport for ClientStdioTransport {
             .take()
             .ok_or_else(|| anyhow::anyhow!("Child process stdout not available"))?;
 
-        *self.stdin.lock().await = Some(BufWriter::new(stdin));
-        *self.stdout.lock().await = Some(BufReader::new(stdout));
+        *self.stdin.lock().await = Some(StdBufWriter::new(stdin));
+        *self.stdout.lock().await = Some(StdBufReader::new(stdout));
         *self.child.lock().await = Some(child);
 
         Ok(())
@@ -158,13 +162,13 @@ impl Transport for ClientStdioTransport {
             let mut stdin_guard = self.stdin.lock().await;
             if let Some(stdin) = stdin_guard.as_mut() {
                 debug!("Flushing stdin");
-                stdin.flush().await?;
+                stdin.flush()?;
             }
             *stdin_guard = None;
         }
 
         let mut child_guard = self.child.lock().await;
-        let Some(child) = child_guard.as_mut() else {
+        let Some(mut child) = child_guard.take() else {
             debug!("No child process to close");
             return Ok(());
         };
@@ -173,7 +177,6 @@ impl Transport for ClientStdioTransport {
         match child.try_wait()? {
             Some(status) => {
                 debug!("Process already exited with status: {}", status);
-                *child_guard = None;
                 return Ok(());
             }
             None => {
@@ -183,22 +186,35 @@ impl Transport for ClientStdioTransport {
         }
 
         if child.try_wait()?.is_none() {
-            debug!("Process still running, sending SIGTERM");
-            child.kill().await?;
+            debug!("Process still running, sending terminate signal");
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                unsafe {
+                    libc::kill(child.id() as i32, libc::SIGTERM);
+                }
+            }
+
+            #[cfg(windows)]
+            {
+                // On Windows we have to kill directly
+                child.kill()?;
+            }
+
             tokio::time::sleep(tokio::time::Duration::from_millis(SIGTERM_TIMEOUT_MS)).await;
         }
 
         if child.try_wait()?.is_none() {
-            debug!("Process not responding to SIGTERM, forcing kill");
-            child.kill().await?;
+            debug!("Process not responding to termination signal, forcing kill");
+            child.kill()?;
         }
 
-        match child.wait().await {
+        match child.wait() {
             Ok(status) => debug!("Process exited with status: {}", status),
             Err(e) => debug!("Error waiting for process exit: {}", e),
         }
 
-        *child_guard = None;
         debug!("Shutdown complete");
         Ok(())
     }
