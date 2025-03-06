@@ -1,13 +1,13 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use clap::{Parser, ValueEnum};
 use mcp_core::{
     protocol::RequestOptions,
     transport::{
         ClientInMemoryTransport, ClientSseTransportBuilder, ClientStdioTransport, Transport,
     },
 };
-use clap::{Parser, ValueEnum};
 use pingpong::inmemory_server;
 use serde_json::json;
 use tracing::info;
@@ -44,8 +44,6 @@ async fn main() -> Result<()> {
             transport.open().await?;
             // Create and start client
             let client = mcp_core::client::ClientBuilder::new(transport.clone()).build();
-            let client_clone = client.clone();
-            let _client_handle = tokio::spawn(async move { client_clone.start().await });
 
             tokio::time::sleep(Duration::from_millis(100)).await;
             // Make a request
@@ -63,8 +61,6 @@ async fn main() -> Result<()> {
             transport.open().await?;
             // Create and start client
             let client = mcp_core::client::ClientBuilder::new(transport.clone()).build();
-            let client_clone = client.clone();
-            let _client_handle = tokio::spawn(async move { client_clone.start().await });
 
             // Make a request
             client
@@ -80,8 +76,6 @@ async fn main() -> Result<()> {
                 ClientInMemoryTransport::new(|t| tokio::spawn(inmemory_server(t)));
             client_transport.open().await?;
             let client = mcp_core::client::ClientBuilder::new(client_transport.clone()).build();
-            let client_clone = client.clone();
-            let _client_handle = tokio::spawn(async move { client_clone.start().await });
 
             // Make a request
             client
@@ -100,8 +94,6 @@ async fn main() -> Result<()> {
             transport.open().await?;
             // Create and start client
             let client = mcp_core::client::ClientBuilder::new(transport.clone()).build();
-            let client_clone = client.clone();
-            let _client_handle = tokio::spawn(async move { client_clone.start().await });
 
             // Make a request
             client

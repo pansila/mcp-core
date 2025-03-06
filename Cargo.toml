@@ -1,10 +1,16 @@
 [workspace]
-members = [".", "examples/client", "examples/file_system", "examples/pingpong"]
+members = [
+    ".",
+    "examples/client",
+    "examples/file_system",
+    "examples/pingpong",
+    "examples/sse",
+]
 default-members = ["examples/file_system", "examples/pingpong"]
 
 [package]
 name = "mcp-core"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "A Rust library implementing the Modern Context Protocol (MCP)"
 repository = "https://github.com/stevohuncho/mcp-core"
@@ -22,15 +28,29 @@ anyhow = "1.0"
 async-trait = "0.1"
 url = { version = "2.5", features = ["serde"] }
 tracing = "0.1"
-reqwest = { version = "0.12.12", features = ["json"] }
-reqwest-eventsource = "0.6.0"
-actix-web = "4"
-tokio-stream = "0.1"
 futures = "0.3"
-jsonwebtoken = "8.1"
-uuid = { version = "1.0", features = ["v4"] }
-actix-ws = "0.2.5"
-tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+# http dependencies
+tokio-tungstenite = { version = "0.21", features = [
+    "native-tls",
+], optional = true }
+jsonwebtoken = { version = "8.1", optional = true }
+uuid = { version = "1.0", features = ["v4"], optional = true }
+reqwest = { version = "0.12.12", features = ["json"], optional = true }
+reqwest-eventsource = { version = "0.6.0", optional = true }
+actix-web = { version = "4", optional = true }
+actix-ws = { version = "0.2.5", optional = true }
+
+[features]
+http = [
+    "actix-web",
+    "actix-ws",
+    "reqwest",
+    "reqwest-eventsource",
+    "uuid",
+    "jsonwebtoken",
+    "tokio-tungstenite",
+]
+
 
 [dev-dependencies]
 tracing-subscriber = "0.3"

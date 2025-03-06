@@ -2,7 +2,7 @@ use super::{Message, Transport};
 use crate::sse::middleware::{AuthConfig, Claims};
 use anyhow::Result;
 use async_trait::async_trait;
-use futures::{StreamExt, TryStreamExt};
+use futures::TryStreamExt;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use reqwest_eventsource::{Event, EventSource};
 
@@ -132,7 +132,7 @@ pub struct ClientSseTransport {
     client: reqwest::Client,
     auth_config: Option<AuthConfig>,
     bearer_token: Option<String>,
-    session_url: Arc<Mutex<Option<String>>>,
+    session_endpoint: Arc<Mutex<Option<String>>>,
     headers: HashMap<String, String>,
 }
 
@@ -209,7 +209,7 @@ impl ClientSseTransportBuilder {
             client: reqwest::Client::new(),
             auth_config: self.auth_config,
             bearer_token: self.bearer_token,
-            session_url: Arc::new(Mutex::new(None)),
+            session_endpoint: Arc::new(Mutex::new(None)),
             headers: self.headers,
         }
     }
@@ -235,10 +235,14 @@ impl Transport for ClientSseTransport {
         let message = message.clone();
         Box::pin(async move {
             let session_url = {
-                let url = self.session_url.lock().await;
-                url.as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("No session URL available"))?
-                    .clone()
+                let url = self.session_endpoint.lock().await;
+                format!(
+                    "{}{}",
+                    self.server_url,
+                    url.as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("No session URL available"))?
+                        .clone()
+                )
             };
 
             let mut request = self.client.post(session_url).json(&message);
@@ -266,7 +270,7 @@ impl Transport for ClientSseTransport {
         let server_url = self.server_url.clone();
         let auth_config = self.auth_config.clone();
         let bearer_token = self.bearer_token.clone();
-        let session_url = self.session_url.clone();
+        let session_endpoint = self.session_endpoint.clone();
         let headers = self.headers.clone();
 
         let handle = tokio::spawn(async move {
@@ -308,7 +312,15 @@ impl Transport for ClientSseTransport {
                     Ok(event) => match event {
                         Event::Message(m) => match &m.event[..] {
                             "endpoint" => {
-                                *session_url.lock().await = Some(m.data);
+                                let endpoint = m
+                                    .data
+                                    .trim_start_matches("http://")
+                                    .trim_start_matches("https://")
+                                    .split_once('/')
+                                    .map(|(_, path)| format!("/{}", path))
+                                    .unwrap_or(m.data);
+                                tracing::info!("Received session endpoint: {}", endpoint);
+                                *session_endpoint.lock().await = Some(endpoint);
                             }
                             _ => {
                                 tx.send(serde_json::from_str(&m.data)?).await?;
@@ -329,7 +341,7 @@ impl Transport for ClientSseTransport {
         // Wait for the session URL to be set
         let mut attempts = 0;
         while attempts < 10 {
-            if self.session_url.lock().await.is_some() {
+            if self.session_endpoint.lock().await.is_some() {
                 return Ok(());
             }
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -342,7 +354,7 @@ impl Transport for ClientSseTransport {
 
     async fn close(&self) -> Result<()> {
         // Clear the session URL to prevent further message sending
-        *self.session_url.lock().await = None;
+        *self.session_endpoint.lock().await = None;
 
         // Close the message channel by dropping the sender
         drop(self.tx.clone());

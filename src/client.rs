@@ -17,7 +17,7 @@ use tracing::debug;
 
 #[derive(Clone)]
 pub struct Client<T: Transport> {
-    protocol: Protocol<T>,
+    protocol: Arc<Protocol<T>>,
     strict: bool,
     initialize_res: Arc<RwLock<Option<InitializeResponse>>>,
     env: Option<HashMap<String, SecureValue>>,
@@ -222,10 +222,6 @@ impl<T: Transport> Client<T> {
 
         Ok(())
     }
-
-    pub async fn start(&self) -> Result<()> {
-        self.protocol.listen().await
-    }
 }
 
 #[derive(Clone)]
@@ -274,8 +270,12 @@ impl<T: Transport> ClientBuilder<T> {
     }
 
     pub fn build(self) -> Client<T> {
+        let protocol = Arc::new(self.protocol.build());
+        let protocol_clone = protocol.clone();
+        tokio::spawn(async move { protocol_clone.listen().await });
+
         Client {
-            protocol: self.protocol.build(),
+            protocol,
             strict: self.strict,
             env: self.env,
             initialize_res: Arc::new(RwLock::new(None)),

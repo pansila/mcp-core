@@ -1,7 +1,6 @@
 use mcp_core::{
     run_http_server,
     server::Server,
-    sse::http_server::Host,
     tool_error_response, tool_text_response,
     types::{CallToolRequest, CallToolResponse, ServerCapabilities, Tool, ToolResponseContent},
 };
@@ -9,7 +8,7 @@ use serde_json::json;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-enum PostDmError {
+enum TestError {
     #[error("Missing data")]
     MissingData,
 }
@@ -22,11 +21,8 @@ async fn main() -> Result<(), anyhow::Error> {
         .init();
 
     run_http_server(
-        Host {
-            host: "127.0.0.1".to_string(),
-            port: 8080,
-            public_url: None,
-        },
+        "127.0.0.1".to_string(),
+        8080,
         None,
         |transport| async move {
             let mut server_builder = Server::builder(transport)
@@ -60,7 +56,7 @@ async fn main() -> Result<(), anyhow::Error> {
                         let data = args.get("test_data");
 
                         if data.is_none() {
-                            return tool_error_response!(PostDmError::MissingData);
+                            return tool_error_response!(TestError::MissingData);
                         };
 
                         tool_text_response!(json!(data).to_string())

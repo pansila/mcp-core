@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
-use mcp_core::{run_http_server, sse::http_server::Host, transport::ServerStdioTransport};
+use mcp_core::{run_http_server, transport::ServerStdioTransport};
 use pingpong::server::build_server;
 
 #[derive(Parser)]
@@ -36,18 +36,10 @@ async fn main() -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("Server error: {}", e))?;
         }
         TransportType::Sse => {
-            run_http_server(
-                Host {
-                    host: "0.0.0.0".to_string(),
-                    port: 8080,
-                    public_url: None,
-                },
-                None,
-                |transport| async move {
-                    let server = build_server(transport);
-                    Ok(server)
-                },
-            )
+            run_http_server("0.0.0.0".to_string(), 8080, None, |transport| async move {
+                let server = build_server(transport);
+                Ok(server)
+            })
             .await?;
         }
     };

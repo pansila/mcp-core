@@ -33,7 +33,6 @@ pub struct MessageQuery {
 #[derive(Clone)]
 pub struct SessionState {
     sessions: Arc<Mutex<HashMap<String, ServerHttpTransport>>>,
-    host: Host,
     build_server: Arc<
         dyn Fn(
                 ServerHttpTransport,
@@ -44,16 +43,10 @@ pub struct SessionState {
     >,
 }
 
-#[derive(Clone)]
-pub struct Host {
-    pub host: String,
-    pub port: u16,
-    pub public_url: Option<String>,
-}
-
 /// Run a server instance with the specified transport
 pub async fn run_http_server<F, Fut>(
-    host: Host,
+    host: String,
+    port: u16,
     jwt_secret: Option<String>,
     build_server: F,
 ) -> Result<()>
@@ -61,9 +54,9 @@ where
     F: Fn(ServerHttpTransport) -> Fut + Send + Sync + 'static,
     Fut: futures::Future<Output = Result<Server<ServerHttpTransport>>> + Send + 'static,
 {
-    info!("Starting server on http://{}:{}", host.host, host.port);
-    info!("WebSocket endpoint: ws://{}:{}/ws", host.host, host.port);
-    info!("SSE endpoint: http://{}:{}/sse", host.host, host.port);
+    info!("Starting server on http://{}:{}", host, port);
+    info!("WebSocket endpoint: ws://{}:{}/ws", host, port);
+    info!("SSE endpoint: http://{}:{}/sse", host, port);
 
     let sessions = Arc::new(Mutex::new(HashMap::new()));
 
@@ -72,14 +65,15 @@ where
         Arc::new(move |t| Box::pin(build_server(t)) as futures::future::BoxFuture<_>);
 
     let auth_config = jwt_secret.map(|jwt_secret| AuthConfig { jwt_secret });
-    let http_server = http_server(host, sessions, auth_config, build_server);
+    let http_server = http_server(host, port, sessions, auth_config, build_server);
 
     http_server.await?;
     Ok(())
 }
 
 pub async fn http_server(
-    host: Host,
+    host: String,
+    port: u16,
     sessions: Arc<Mutex<HashMap<String, ServerHttpTransport>>>,
     auth_config: Option<AuthConfig>,
     build_server: Arc<
@@ -94,7 +88,6 @@ pub async fn http_server(
     let session_state = SessionState {
         sessions,
         build_server,
-        host: host.clone(),
     };
 
     let server = HttpServer::new(move || {
@@ -107,7 +100,7 @@ pub async fn http_server(
             .route("/message", web::post().to(message_handler))
             .route("/ws", web::get().to(ws_handler))
     })
-    .bind((host.host, host.port))?
+    .bind((host, port))?
     .run();
 
     server.await
@@ -146,18 +139,9 @@ pub async fn sse_handler(
     );
 
     // Create initial endpoint info event
-    let public_url = session_state.host.public_url.as_ref().map_or_else(
-        || {
-            format!(
-                "http://{}:{}",
-                session_state.host.host, session_state.host.port
-            )
-        },
-        |url| url.to_string(),
-    );
     let endpoint_info = format!(
-        "event: endpoint\ndata: {}/message?sessionId={}\n\n",
-        public_url, session_id
+        "event: endpoint\ndata: /message?sessionId={}\n\n",
+        session_id
     );
 
     let stream = futures::stream::once(async move {

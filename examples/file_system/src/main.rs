@@ -1,7 +1,8 @@
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use file_system::server::build_server;
-use mcp_core::{run_http_server, sse::http_server::Host, transport::ServerStdioTransport};
+use mcp_core::run_http_server;
+use mcp_core::transport::ServerStdioTransport;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -37,11 +38,8 @@ async fn main() -> Result<()> {
         }
         TransportType::Sse => {
             run_http_server(
-                Host {
-                    host: "127.0.0.1".to_string(),
-                    port: 8080,
-                    public_url: None,
-                },
+                "127.0.0.1".to_string(),
+                8080,
                 None,
                 |transport| async move {
                     let server = build_server(transport);

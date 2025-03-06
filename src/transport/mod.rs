@@ -8,16 +8,26 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+// Transports
 mod stdio_transport;
 pub use stdio_transport::*;
 mod inmemory_transport;
 pub use inmemory_transport::*;
+
+// Http transports
+#[cfg(feature = "http")]
 mod sse_transport;
+#[cfg(feature = "http")]
 pub use sse_transport::*;
+#[cfg(feature = "http")]
 mod ws_transport;
+#[cfg(feature = "http")]
 pub use ws_transport::*;
+#[cfg(feature = "http")]
 mod http_transport;
+#[cfg(feature = "http")]
 pub use http_transport::*;
+
 /// only JsonRpcMessage is supported for now
 /// https://spec.modelcontextprotocol.io/specification/basic/messages/
 pub type Message = JsonRpcMessage;
