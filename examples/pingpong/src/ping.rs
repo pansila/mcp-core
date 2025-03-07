@@ -1,7 +1,6 @@
-use std::{future::Future, pin::Pin};
-
 use mcp_core::{
     tool_text_response,
+    tools::ToolHandlerFn,
     types::{CallToolRequest, CallToolResponse, Tool, ToolResponseContent},
 };
 pub struct PingTool;
@@ -19,9 +18,7 @@ impl PingTool {
         }
     }
 
-    pub async fn call(
-    ) -> impl Fn(CallToolRequest) -> Pin<Box<dyn Future<Output = CallToolResponse> + Send + Sync>>
-    {
+    pub async fn call() -> ToolHandlerFn {
         move |_: CallToolRequest| Box::pin(async move { tool_text_response!("pong".to_string()) })
     }
 }

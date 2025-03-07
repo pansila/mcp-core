@@ -1,8 +1,7 @@
-use std::{future::Future, pin::Pin};
-
 use anyhow::Result;
 use mcp_core::{
     tool_error_response, tool_text_response,
+    tools::ToolHandlerFn,
     types::{CallToolRequest, CallToolResponse, Tool, ToolResponseContent},
 };
 
@@ -33,8 +32,7 @@ impl GetFileInfoTool {
         }
     }
 
-    pub async fn call(
-    ) -> impl Fn(CallToolRequest) -> Pin<Box<dyn Future<Output = CallToolResponse> + Send + Sync>> {
+    pub async fn call() -> ToolHandlerFn {
         move |req: CallToolRequest| {
             Box::pin(async move {
                 let args = req.arguments.unwrap_or_default();

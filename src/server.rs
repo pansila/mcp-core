@@ -5,8 +5,8 @@ use std::{
 
 use crate::{
     protocol::Protocol,
-    tools::{ToolHandler, Tools},
-    types::{CallToolRequest, CallToolResponse, ListRequest, Tool, ToolsListResponse},
+    tools::{ToolHandler, ToolHandlerFn, Tools},
+    types::{CallToolRequest, ListRequest, Tool, ToolsListResponse},
 };
 
 use super::{
@@ -18,7 +18,6 @@ use super::{
     },
 };
 use anyhow::Result;
-use std::future::Future;
 use std::pin::Pin;
 
 #[derive(Clone)]
@@ -69,14 +68,7 @@ impl ServerProtocolBuilder {
         self
     }
 
-    pub fn register_tool(
-        mut self,
-        tool: Tool,
-        f: impl Fn(CallToolRequest) -> Pin<Box<dyn Future<Output = CallToolResponse> + Send + Sync>>
-            + Send
-            + Sync
-            + 'static,
-    ) -> Self {
+    pub fn register_tool(mut self, tool: Tool, f: ToolHandlerFn) -> Self {
         self.tools.insert(
             tool.name.clone(),
             ToolHandler {

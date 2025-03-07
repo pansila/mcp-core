@@ -35,11 +35,11 @@ impl Tools {
             .collect()
     }
 }
+
+pub type ToolHandlerFn =
+    fn(CallToolRequest) -> Pin<Box<dyn Future<Output = CallToolResponse> + Send>>;
+
 pub(crate) struct ToolHandler {
     pub tool: Tool,
-    pub f: Box<
-        dyn Fn(CallToolRequest) -> Pin<Box<dyn Future<Output = CallToolResponse> + Send + Sync>>
-            + Send
-            + Sync,
-    >,
+    pub f: Box<ToolHandlerFn>,
 }
