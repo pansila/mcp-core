@@ -170,7 +170,7 @@ impl Transport for ClientStdioTransport {
         method: &str,
         params: Option<serde_json::Value>,
         options: RequestOptions,
-    ) -> Pin<Box<dyn Future<Output = Result<JsonRpcResponse>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<JsonRpcResponse>> + Send + Sync>> {
         let protocol = self.protocol.clone();
         let stdin_arc = self.stdin.clone();
         let method = method.to_owned();

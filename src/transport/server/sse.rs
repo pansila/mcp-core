@@ -90,7 +90,7 @@ impl Transport for ServerSseTransport {
         _method: &str,
         _params: Option<serde_json::Value>,
         _options: RequestOptions,
-    ) -> Pin<Box<dyn Future<Output = Result<JsonRpcResponse>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<JsonRpcResponse>> + Send + Sync>> {
         Box::pin(async move { Ok(JsonRpcResponse::default()) })
     }
 
@@ -262,7 +262,7 @@ impl Transport for ServerSseTransportSession {
         method: &str,
         params: Option<serde_json::Value>,
         options: RequestOptions,
-    ) -> Pin<Box<dyn Future<Output = Result<JsonRpcResponse>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<JsonRpcResponse>> + Send + Sync>> {
         let protocol = self.protocol.clone();
         let tx = self.tx.clone();
 

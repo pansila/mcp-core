@@ -195,7 +195,7 @@ impl Transport for ClientSseTransport {
         method: &str,
         params: Option<serde_json::Value>,
         options: RequestOptions,
-    ) -> Pin<Box<dyn Future<Output = Result<JsonRpcResponse>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<JsonRpcResponse>> + Send + Sync>> {
         let protocol = self.protocol.clone();
         let client = self.client.clone();
         let server_url = self.server_url.clone();

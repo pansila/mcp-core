@@ -75,7 +75,7 @@ impl Transport for ServerStdioTransport {
         method: &str,
         params: Option<serde_json::Value>,
         options: RequestOptions,
-    ) -> Pin<Box<dyn Future<Output = Result<JsonRpcResponse>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<JsonRpcResponse>> + Send + Sync>> {
         let protocol = self.protocol.clone();
         let method = method.to_owned();
         Box::pin(async move {

@@ -36,7 +36,7 @@ pub trait Transport: Send + Sync + 'static {
         method: &str,
         params: Option<serde_json::Value>,
         options: RequestOptions,
-    ) -> Pin<Box<dyn Future<Output = Result<JsonRpcResponse>> + Send>>;
+    ) -> Pin<Box<dyn Future<Output = Result<JsonRpcResponse>> + Send + Sync>>;
 
     async fn send_notification(
         &self,
