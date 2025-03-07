@@ -72,7 +72,7 @@ impl ServerProtocolBuilder {
     pub fn register_tool(
         mut self,
         tool: Tool,
-        f: impl Fn(CallToolRequest) -> Pin<Box<dyn Future<Output = CallToolResponse> + Send>>
+        f: impl Fn(CallToolRequest) -> Pin<Box<dyn Future<Output = CallToolResponse> + Send + Sync>>
             + Send
             + Sync
             + 'static,

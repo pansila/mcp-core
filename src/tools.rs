@@ -38,7 +38,7 @@ impl Tools {
 pub(crate) struct ToolHandler {
     pub tool: Tool,
     pub f: Box<
-        dyn Fn(CallToolRequest) -> Pin<Box<dyn Future<Output = CallToolResponse> + Send>>
+        dyn Fn(CallToolRequest) -> Pin<Box<dyn Future<Output = CallToolResponse> + Send + Sync>>
             + Send
             + Sync,
     >,

@@ -38,7 +38,8 @@ impl SearchFilesTool {
     }
 
     pub async fn call(
-    ) -> impl Fn(CallToolRequest) -> Pin<Box<dyn Future<Output = CallToolResponse> + Send>> {
+    ) -> impl Fn(CallToolRequest) -> Pin<Box<dyn Future<Output = CallToolResponse> + Send + Sync>>
+    {
         move |req: CallToolRequest| {
             Box::pin(async move {
                 let args = req.arguments.unwrap_or_default();
