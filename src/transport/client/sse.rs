@@ -79,7 +79,7 @@ impl Transport for ClientSseTransport {
     async fn open(&self) -> Result<()> {
         debug!("ClientSseTransport: Opening transport");
 
-        let mut request = self.client.get(&format!("{}/sse", self.server_url));
+        let mut request = self.client.get(self.server_url.clone());
 
         // Add custom headers
         for (key, value) in &self.headers {
@@ -220,7 +220,22 @@ impl Transport for ClientSseTransport {
                     .clone()
             };
 
-            let full_url = format!("{}{}", server_url, session_url);
+            let base_url = if let Some(idx) = server_url.find("://") {
+                let domain_start = idx + 3;
+                let domain_end = server_url[domain_start..]
+                    .find('/')
+                    .map(|i| domain_start + i)
+                    .unwrap_or(server_url.len());
+                &server_url[..domain_end]
+            } else {
+                let domain_end = server_url.find('/').unwrap_or(server_url.len());
+                &server_url[..domain_end]
+            }
+            .to_string();
+
+            debug!("ClientSseTransport: Base URL: {}", base_url);
+
+            let full_url = format!("{}{}", base_url, session_url);
             debug!(
                 "ClientSseTransport: Sending request to {}: {:?}",
                 full_url, request
@@ -301,7 +316,23 @@ impl Transport for ClientSseTransport {
                 .clone()
         };
 
-        let full_url = format!("{}{}", self.server_url, session_url);
+        let server_url = self.server_url.clone();
+        let base_url = if let Some(idx) = server_url.find("://") {
+            let domain_start = idx + 3;
+            let domain_end = server_url[domain_start..]
+                .find('/')
+                .map(|i| domain_start + i)
+                .unwrap_or(server_url.len());
+            &server_url[..domain_end]
+        } else {
+            let domain_end = server_url.find('/').unwrap_or(server_url.len());
+            &server_url[..domain_end]
+        }
+        .to_string();
+
+        debug!("ClientSseTransport: Base URL: {}", base_url);
+
+        let full_url = format!("{}{}", base_url, session_url);
         debug!(
             "ClientSseTransport: Sending response to {}: {:?}",
             full_url, response
@@ -345,7 +376,23 @@ impl Transport for ClientSseTransport {
                 .clone()
         };
 
-        let full_url = format!("{}{}", self.server_url, session_url);
+        let server_url = self.server_url.clone();
+        let base_url = if let Some(idx) = server_url.find("://") {
+            let domain_start = idx + 3;
+            let domain_end = server_url[domain_start..]
+                .find('/')
+                .map(|i| domain_start + i)
+                .unwrap_or(server_url.len());
+            &server_url[..domain_end]
+        } else {
+            let domain_end = server_url.find('/').unwrap_or(server_url.len());
+            &server_url[..domain_end]
+        }
+        .to_string();
+
+        debug!("ClientSseTransport: Base URL: {}", base_url);
+
+        let full_url = format!("{}{}", base_url, session_url);
         debug!(
             "ClientSseTransport: Sending notification to {}: {:?}",
             full_url, notification

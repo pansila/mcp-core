@@ -1,6 +1,7 @@
-mod ping;
+mod echo;
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
+use echo::*;
 use mcp_core::{
     server::Server,
     transport::{ServerSseTransport, ServerStdioTransport},
@@ -32,14 +33,14 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    let server_protocol = Server::builder("pingpong".to_string(), "1.0".to_string())
+    let server_protocol = Server::builder("echo".to_string(), "1.0".to_string())
         .capabilities(ServerCapabilities {
             tools: Some(json!({
                 "listChanged": false,
             })),
             ..Default::default()
         })
-        .register_tool(ping::PingTool::tool(), ping::PingTool::call().await)
+        .register_tool(EchoTool::tool(), EchoTool::call().await)
         .build();
 
     match cli.transport {

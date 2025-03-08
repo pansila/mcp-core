@@ -40,11 +40,12 @@ mcp-core = "0.1.32"
 ```
 
 ## Server Implementation
-Easily start your own local SSE MCP Servers with tooling capabilities. To use SSE functionality, make sure to enable the "http" feature in your Cargo.toml `mcp-core = { version = "0.1.32", features = ["sse_server"] }`
+Easily start your own local SSE MCP Servers with tooling capabilities. To use SSE functionality, make sure to enable the "http" feature in your Cargo.toml `mcp-core = { version = "0.1.32", features = ["sse"] }`
 ```rs
-mod ping;
+mod echo;
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
+use echo::*;
 use mcp_core::{
     server::Server,
     transport::{ServerSseTransport, ServerStdioTransport},
@@ -76,14 +77,14 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    let server_protocol = Server::builder("pingpong".to_string(), "1.0".to_string())
+    let server_protocol = Server::builder("echo".to_string(), "1.0".to_string())
         .capabilities(ServerCapabilities {
             tools: Some(json!({
                 "listChanged": false,
             })),
             ..Default::default()
         })
-        .register_tool(ping::PingTool::tool(), ping::PingTool::call().await)
+        .register_tool(EchoTool::tool(), EchoTool::call().await)
         .build();
 
     match cli.transport {
@@ -140,8 +141,8 @@ async fn main() -> Result<()> {
     let response = match cli.transport {
         TransportType::Stdio => {
             // Build the server first
-            // cargo build --bin pingpong_server
-            let transport = ClientStdioTransport::new("./target/debug/pingpong_server", &[])?;
+            // cargo build --bin echo_server
+            let transport = ClientStdioTransport::new("./target/debug/echo_server", &[])?;
             let client = ClientBuilder::new(transport.clone()).build();
             tokio::time::sleep(Duration::from_millis(100)).await;
             client.open().await?;
@@ -149,7 +150,7 @@ async fn main() -> Result<()> {
             client
                 .initialize(
                     Implementation {
-                        name: "pingpong".to_string(),
+                        name: "echo".to_string(),
                         version: "1.0".to_string(),
                     },
                     ClientCapabilities::default(),
@@ -157,16 +158,17 @@ async fn main() -> Result<()> {
                 .await?;
 
             client
-                .request(
-                    "tools/call",
-                    Some(json!({"name": "ping", "arguments": {}})),
-                    RequestOptions::default().timeout(Duration::from_secs(5)),
+                .call_tool(
+                    "echo",
+                    Some(json!({
+                        "message": "Hello, world!"
+                    })),
                 )
                 .await?
         }
         TransportType::Sse => {
             let client = ClientBuilder::new(
-                ClientSseTransportBuilder::new("http://localhost:3000".to_string()).build(),
+                ClientSseTransportBuilder::new("http://localhost:3000/sse".to_string()).build(),
             )
             .build();
             client.open().await?;
@@ -174,7 +176,7 @@ async fn main() -> Result<()> {
             client
                 .initialize(
                     Implementation {
-                        name: "pingpong".to_string(),
+                        name: "echo".to_string(),
                         version: "1.0".to_string(),
                     },
                     ClientCapabilities::default(),
@@ -182,15 +184,16 @@ async fn main() -> Result<()> {
                 .await?;
 
             client
-                .request(
-                    "tools/call",
-                    Some(json!({"name": "ping", "arguments": {}})),
-                    RequestOptions::default().timeout(Duration::from_secs(5)),
+                .call_tool(
+                    "echo",
+                    Some(json!({
+                        "message": "Hello, world!"
+                    })),
                 )
                 .await?
         }
     };
-    info!("response: {response}");
+    info!("response: {:?}", response);
     Ok(())
 }
 ```
@@ -198,33 +201,21 @@ async fn main() -> Result<()> {
 ### Setting `SecureValues` to your SSE MCP Client
 Have API Keys or Secrets needed to be passed to MCP Tool Calls, but you don't want to pass this information to the LLM you are prompting? Use `mcp_core::client::SecureValue`!
 ```rs
-McpClient::builder(transport)
-    .with_secure_value(
-        "discord_token",
-        mcp_core::client::SecureValue::Static(discord_token),
-    )
-    .with_secure_value(
-        "anthropic_api_key",
-        mcp_core::client::SecureValue::Env("ANTHROPIC_API_KEY".to_string()),
-    )
-    .use_strict()
-    .build()
+ClientBuilder::new(
+    ClientSseTransportBuilder::new("http://localhost:3000/sse".to_string()).build(),
+)
+.with_secure_value(
+    "discord_token",
+    mcp_core::client::SecureValue::Static(discord_token),
+)
+.with_secure_value(
+    "anthropic_api_key",
+    mcp_core::client::SecureValue::Env("ANTHROPIC_API_KEY".to_string()),
+)
+.use_strict()
+.build()
 ```
 #### mcp_core::client::SecureValue::Static
 Automatically have **MCP Tool Call Parameters** be replaced by the string value set to it.
 #### mcp_core::client::SecureValue::Env
 Automatically have **MCP Tool Call Parameters** be replaced by the value in your `.env` from the string set to it.
-
-### SSE MCP Client Tool Call
-```rs
-let response = mcp_client
-    .call_tool(
-        "PostMessage",
-        Some(json!({
-            "content": "Hello, world!"
-        })),
-    )
-    .await?;
-
-println!("Response: {:?}", response);
-```

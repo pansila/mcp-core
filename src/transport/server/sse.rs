@@ -120,7 +120,6 @@ pub async fn sse_handler(
         .peer_addr()
         .map(|addr| addr.ip().to_string())
         .unwrap_or_else(|| "unknown".to_string());
-
     tracing::info!("New SSE connection request from {}", client_ip);
 
     // Create new session
@@ -194,6 +193,11 @@ async fn message_handler(
         if let Some(transport) = sessions.get(session_id) {
             match message.into_inner() {
                 JsonRpcMessage::Request(request) => {
+                    tracing::debug!(
+                        "Received request from session {}: {:?}",
+                        session_id,
+                        request
+                    );
                     let response = transport.protocol.handle_request(request).await;
                     match transport
                         .send_response(response.id, response.result, response.error)
@@ -214,10 +218,20 @@ async fn message_handler(
                     }
                 }
                 JsonRpcMessage::Response(response) => {
+                    tracing::debug!(
+                        "Received response from session {}: {:?}",
+                        session_id,
+                        response
+                    );
                     transport.protocol.handle_response(response).await;
                     HttpResponse::Accepted().finish()
                 }
                 JsonRpcMessage::Notification(notification) => {
+                    tracing::debug!(
+                        "Received notification from session {}: {:?}",
+                        session_id,
+                        notification
+                    );
                     transport.protocol.handle_notification(notification).await;
                     HttpResponse::Accepted().finish()
                 }

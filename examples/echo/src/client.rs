@@ -36,8 +36,8 @@ async fn main() -> Result<()> {
     let response = match cli.transport {
         TransportType::Stdio => {
             // Build the server first
-            // cargo build --bin pingpong_server
-            let transport = ClientStdioTransport::new("./target/debug/pingpong_server", &[])?;
+            // cargo build --bin echo_server
+            let transport = ClientStdioTransport::new("./target/debug/echo_server", &[])?;
             let client = ClientBuilder::new(transport.clone()).build();
             tokio::time::sleep(Duration::from_millis(100)).await;
             client.open().await?;
@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
             client
                 .initialize(
                     Implementation {
-                        name: "pingpong".to_string(),
+                        name: "echo".to_string(),
                         version: "1.0".to_string(),
                     },
                     ClientCapabilities::default(),
@@ -53,16 +53,17 @@ async fn main() -> Result<()> {
                 .await?;
 
             client
-                .request(
-                    "tools/call",
-                    Some(json!({"name": "ping", "arguments": {}})),
-                    RequestOptions::default().timeout(Duration::from_secs(5)),
+                .call_tool(
+                    "echo",
+                    Some(json!({
+                        "message": "Hello, world!"
+                    })),
                 )
                 .await?
         }
         TransportType::Sse => {
             let client = ClientBuilder::new(
-                ClientSseTransportBuilder::new("http://localhost:3000".to_string()).build(),
+                ClientSseTransportBuilder::new("http://localhost:3000/sse".to_string()).build(),
             )
             .build();
             client.open().await?;
@@ -70,7 +71,7 @@ async fn main() -> Result<()> {
             client
                 .initialize(
                     Implementation {
-                        name: "pingpong".to_string(),
+                        name: "echo".to_string(),
                         version: "1.0".to_string(),
                     },
                     ClientCapabilities::default(),
@@ -83,9 +84,18 @@ async fn main() -> Result<()> {
                     None,
                     RequestOptions::default().timeout(Duration::from_secs(5)),
                 )
+                .await?;
+
+            client
+                .call_tool(
+                    "echo",
+                    Some(json!({
+                        "message": "Hello, world!"
+                    })),
+                )
                 .await?
         }
     };
-    info!("response: {response}");
+    info!("response: {:?}", response);
     Ok(())
 }

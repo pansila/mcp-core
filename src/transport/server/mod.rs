@@ -1,7 +1,7 @@
 mod stdio;
 pub use stdio::ServerStdioTransport;
 
-#[cfg(feature = "sse_server")]
+#[cfg(feature = "sse")]
 mod sse;
-#[cfg(feature = "sse_server")]
+#[cfg(feature = "sse")]
 pub use sse::ServerSseTransport;
