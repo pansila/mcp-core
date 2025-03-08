@@ -1,0 +1,37 @@
+[package]
+name = "mcp-core"
+version = "0.1.37"
+edition = "2021"
+description = "A Rust library implementing the Modern Context Protocol (MCP)"
+repository = "https://github.com/stevohuncho/mcp-core"
+license = "Apache-2.0"
+authors = ["https://github.com/stevohuncho"]
+documentation = "https://github.com/stevohuncho/mcp-core#readme"
+homepage = "https://github.com/stevohuncho/mcp-core"
+readme = "README.md"
+
+[dependencies]
+tokio = { version = "1.0", features = ["time", "sync", "rt"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+async-trait = "0.1"
+url = { version = "2.5", features = ["serde"] }
+tracing = "0.1"
+futures = "0.3"
+libc = "0.2.170"
+# sse dependencies
+uuid = { version = "1.0", features = ["v4"], optional = true }
+actix-web = { version = "4", optional = true }
+reqwest = { version = "0.12.12", features = ["json"], optional = true }
+reqwest-eventsource = { version = "0.6.0", optional = true }
+
+[features]
+sse = ["actix-web", "uuid", "reqwest", "reqwest-eventsource"]
+
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["full"] }
+tracing-subscriber = "0.3"
+dotenv = "0.15.0"
+thiserror = "2.0.11"
