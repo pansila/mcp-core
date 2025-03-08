@@ -146,7 +146,7 @@ pub fn tool(args: TokenStream, input: TokenStream) -> TokenStream {
                 }
             }
 
-            pub async fn call() -> mcp_core::tools::ToolHandlerFn {
+            pub fn call() -> mcp_core::tools::ToolHandlerFn {
                 move |req: mcp_core::types::CallToolRequest| {
                     Box::pin(async move {
                         let params = match req.arguments {
