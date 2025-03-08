@@ -4,7 +4,7 @@ use quote::{format_ident, quote};
 use std::collections::HashMap;
 use syn::{
     parse::Parse, parse::ParseStream, parse_macro_input, punctuated::Punctuated, Expr, ExprLit,
-    FnArg, ItemFn, Lit, Meta, Pat, PatType, Token,
+    FnArg, ItemFn, Lit, Meta, Pat, PatType, Token, Type,
 };
 
 struct MacroArgs {
@@ -71,20 +71,15 @@ pub fn tool(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as MacroArgs);
     let input_fn = parse_macro_input!(input as ItemFn);
 
-    // Extract function details
     let fn_name = &input_fn.sig.ident;
     let fn_name_str = fn_name.to_string();
-
-    // Generate PascalCase struct name from the function name
     let struct_name = format_ident!("{}", { fn_name_str.to_case(Case::Pascal) });
-
-    // Use provided name or function name as default
     let tool_name = args.name.unwrap_or(fn_name_str);
     let tool_description = args.description.unwrap_or_default();
 
-    // Extract parameter names, types, and descriptions
     let mut param_defs = Vec::new();
     let mut param_names = Vec::new();
+    let mut required_params = Vec::new();
 
     for arg in input_fn.sig.inputs.iter() {
         if let FnArg::Typed(PatType { pat, ty, .. }) = arg {
@@ -98,6 +93,22 @@ pub fn tool(args: TokenStream, input: TokenStream) -> TokenStream {
                     .unwrap_or("");
 
                 param_names.push(param_name);
+
+                // Check if the parameter type is Option<T>
+                let is_optional = if let Type::Path(type_path) = &**ty {
+                    type_path
+                        .path
+                        .segments
+                        .last()
+                        .map_or(false, |segment| segment.ident == "Option")
+                } else {
+                    false
+                };
+
+                if !is_optional {
+                    required_params.push(param_name_str.clone());
+                }
+
                 param_defs.push(quote! {
                     #[schemars(description = #description)]
                     #param_name: #ty
@@ -106,7 +117,6 @@ pub fn tool(args: TokenStream, input: TokenStream) -> TokenStream {
         }
     }
 
-    // Generate the implementation
     let params_struct_name = format_ident!("{}Parameters", struct_name);
     let expanded = quote! {
         #[derive(serde::Deserialize, schemars::JsonSchema)]
@@ -122,7 +132,12 @@ pub fn tool(args: TokenStream, input: TokenStream) -> TokenStream {
         impl #struct_name {
             pub fn tool() -> mcp_core::types::Tool {
                 let schema = schemars::schema_for!(#params_struct_name);
-                let schema = serde_json::to_value(schema.schema).unwrap_or_default();
+                let mut schema = serde_json::to_value(schema.schema).unwrap_or_default();
+                if let serde_json::Value::Object(ref mut map) = schema {
+                    map.insert("required".to_string(), serde_json::Value::Array(
+                        vec![#(serde_json::Value::String(#required_params.to_string())),*]
+                    ));
+                }
 
                 mcp_core::types::Tool {
                     name: #tool_name.to_string(),
@@ -152,7 +167,6 @@ pub fn tool(args: TokenStream, input: TokenStream) -> TokenStream {
 
                         match #fn_name(#(params.#param_names,)*).await {
                             Ok(response) => {
-                                // Handle both single ToolResponseContent and Vec<ToolResponseContent>
                                 let content = if let Ok(vec_content) = serde_json::from_value::<Vec<mcp_core::types::ToolResponseContent>>(
                                     serde_json::to_value(&response).unwrap_or_default()
                                 ) {

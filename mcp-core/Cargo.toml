@@ -41,7 +41,7 @@ anyhow = "1.0"
 tracing = "0.1"
 home = "0.5.9"
 clap = { version = "4.4", features = ["derive"] }
-mcp-core-macros = "0.1.0"
+mcp-core-macros = { path = "../mcp-core-macros" }
 schemars = "0.8"
 
 [[example]]

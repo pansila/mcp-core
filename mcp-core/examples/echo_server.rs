@@ -35,8 +35,6 @@ async fn echo_tool(message: String) -> Result<ToolResponseContent> {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
-        // needs to be stderr due to stdio transport
-        .with_writer(std::io::stderr)
         .init();
 
     let cli = Cli::parse();
