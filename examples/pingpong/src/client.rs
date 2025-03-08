@@ -79,8 +79,8 @@ async fn main() -> Result<()> {
 
             client
                 .request(
-                    "tools/call",
-                    Some(json!({"name": "ping", "arguments": {}})),
+                    "tools/list",
+                    None,
                     RequestOptions::default().timeout(Duration::from_secs(5)),
                 )
                 .await?

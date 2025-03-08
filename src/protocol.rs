@@ -4,6 +4,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde_json::json;
 use std::pin::Pin;
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -237,7 +238,7 @@ where
     async fn handle(&self, request: JsonRpcRequest) -> Result<JsonRpcResponse> {
         let params: Req = if request.params.is_none() || request.params.as_ref().unwrap().is_null()
         {
-            serde_json::from_value(serde_json::Value::Null)?
+            serde_json::from_value(json!({}))?
         } else {
             serde_json::from_value(request.params.unwrap())?
         };
