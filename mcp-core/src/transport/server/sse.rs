@@ -15,9 +15,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::StreamExt;
 use serde::Deserialize;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::{collections::HashMap, future::Future};
+use std::{pin::Pin, time::Duration};
 use tokio::{
     sync::{mpsc, Mutex},
     time::timeout,
@@ -139,6 +139,26 @@ pub async fn sse_handler(
         session_id
     );
 
+    // Spawn a task to handle ping notifications separately
+    let transport_ping = transport.clone();
+    let session_id_ping = session_id.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(15)).await;
+            if let Some(session) = transport_ping.get_session(&session_id_ping).await {
+                if let Err(e) = session.send_notification("ping", None).await {
+                    tracing::error!(
+                        "Failed to send ping to session {}: {:?}",
+                        session_id_ping,
+                        e
+                    );
+                }
+            } else {
+                break;
+            }
+        }
+    });
+
     let stream = futures::stream::once(async move {
         Ok::<_, std::convert::Infallible>(web::Bytes::from(endpoint_info))
     })
@@ -153,7 +173,7 @@ pub async fn sse_handler(
                     Ok(Some(msg)) => {
                         tracing::debug!("Sending SSE message to Session {}: {:?}", session_id, msg);
                         let json = serde_json::to_string(&msg).unwrap();
-                        let sse_data = format!("data: {}\n\n", json);
+                        let sse_data = format!("event: message\ndata: {}\n\n", json);
                         let response =
                             Ok::<_, std::convert::Infallible>(web::Bytes::from(sse_data));
                         Some((response, (transport, session_id, client_ip)))

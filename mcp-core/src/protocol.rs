@@ -66,8 +66,12 @@ impl Protocol {
         }
     }
 
+    pub fn new_message_id(&self) -> u64 {
+        self.request_id.fetch_add(1, Ordering::SeqCst)
+    }
+
     pub async fn create_request(&self) -> (u64, oneshot::Receiver<JsonRpcResponse>) {
-        let id = self.request_id.fetch_add(1, Ordering::SeqCst);
+        let id = self.new_message_id();
         let (tx, rx) = oneshot::channel();
 
         {

@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
             })),
             ..Default::default()
         })
-        .register_tool(EchoTool::tool(), EchoTool::call().await)
+        .register_tool(EchoTool::tool(), EchoTool::call())
         .build();
 
     match cli.transport {
