@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use mcp_core::{
     server::Server,
+    tool_text_content,
     transport::{ServerSseTransport, ServerStdioTransport},
     types::{ServerCapabilities, ToolResponseContent},
 };
@@ -28,7 +29,7 @@ enum TransportType {
     params(message = "The message to echo back")
 )]
 async fn echo_tool(message: String) -> Result<ToolResponseContent> {
-    Ok(ToolResponseContent::Text { text: message })
+    Ok(tool_text_content!(message))
 }
 
 #[tokio::main]

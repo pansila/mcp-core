@@ -36,11 +36,11 @@ cargo add mcp-core
 Or add `mcp-core` to your `Cargo.toml` dependencies directly
 ```toml
 [dependencies]
-mcp-core = "0.1.32"
+mcp-core = "0.1.42"
 ```
 
 ## Server Implementation
-Easily start your own local SSE MCP Servers with tooling capabilities. To use SSE functionality, make sure to enable the "http" feature in your Cargo.toml `mcp-core = { version = "0.1.32", features = ["sse"] }`
+Easily start your own local SSE MCP Servers with tooling capabilities. To use SSE functionality, make sure to enable the "http" feature in your Cargo.toml `mcp-core = { version = "0.1.42", features = ["sse"] }`
 ```rs
 mod echo;
 use anyhow::Result;
