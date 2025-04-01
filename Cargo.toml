@@ -1,3 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["mcp-core", "mcp-core-macros"]
+
+[patch.crates-io]
+mcp-core = { path = "./mcp-core" }
+mcp-core-macros = { path = "./mcp-core-macros" }

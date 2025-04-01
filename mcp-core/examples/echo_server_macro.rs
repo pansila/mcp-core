@@ -2,11 +2,11 @@ use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use mcp_core::{
     server::Server,
-    tool_text_response,
-    tools::ToolHandlerFn,
+    tool_text_content,
     transport::{ServerSseTransport, ServerStdioTransport},
-    types::{CallToolRequest, ServerCapabilities, Tool, ToolResponseContent, CallToolResponse},
+    types::{ServerCapabilities, ToolResponseContent},
 };
+use mcp_core_macros::tool;
 use serde_json::json;
 
 #[derive(Parser)]
@@ -23,41 +23,13 @@ enum TransportType {
     Sse,
 }
 
-struct EchoTool;
-
-impl EchoTool {
-    fn tool() -> Tool {
-        Tool {
-            name: "echo".to_string(),
-            description: Some("Echo back the message you send".to_string()),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "message": {
-                        "type": "string",
-                        "description": "The message to echo back"
-                    }
-                },
-                "required": ["message"]
-            }),
-        }
-    }
-
-    fn call() -> ToolHandlerFn {
-        move |request: CallToolRequest| {
-            Box::pin(async move {
-                let message = request
-                    .arguments
-                    .as_ref()
-                    .and_then(|args| args.get("message"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                tool_text_response!(message)
-            })
-        }
-    }
+#[tool(
+    name = "echo",
+    description = "Echo back the message you send",
+    params(message = "The message to echo back")
+)]
+async fn echo_tool(message: String) -> Result<ToolResponseContent> {
+    Ok(tool_text_content!(message))
 }
 
 #[tokio::main]

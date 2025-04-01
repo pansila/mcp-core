@@ -36,7 +36,7 @@ cargo add mcp-core
 Or add `mcp-core` to your `Cargo.toml` dependencies directly
 ```toml
 [dependencies]
-mcp-core = "0.1.42"
+mcp-core = "0.1.43"
 ```
 
 ## Server Implementation
@@ -97,6 +97,75 @@ async fn main() -> Result<()> {
             Server::start(transport).await
         }
     }
+}
+```
+
+## Creating MCP Tools
+There are two ways to create tools in MCP Core: using macros (recommended) or manually implementing the tool trait.
+
+### Using Macros (Recommended)
+The easiest way to create a tool is using the `mcp-core-macros` crate. First, add it to your dependencies:
+```toml
+[dependencies]
+mcp-core-macros = "0.1.11"
+```
+
+Then create your tool using the `#[tool]` macro:
+```rust
+use mcp_core::{tool_text_content, types::ToolResponseContent};
+use mcp_core_macros::tool;
+use anyhow::Result;
+
+#[tool(
+    name = "echo",
+    description = "Echo back the message you send",
+    params(message = "The message to echo back")
+)]
+async fn echo_tool(message: String) -> Result<ToolResponseContent> {
+    Ok(tool_text_content!(message))
+}
+```
+
+The macro automatically generates all the necessary boilerplate code for your tool. You can then register it with your server:
+
+```rust
+let server_protocol = Server::builder("echo".to_string(), "1.0".to_string())
+    .capabilities(ServerCapabilities {
+        tools: Some(json!({
+            "listChanged": false,
+        })),
+        ..Default::default()
+    })
+    .register_tool(EchoTool::tool(), EchoTool::call())
+    .build();
+```
+
+### Tool Parameters
+Tools can have various parameter types that are automatically deserialized from the client's JSON input:
+- Basic types (String, f64, bool)
+- Optional types (Option<T>)
+
+For example:
+```rust
+#[derive(Deserialize)]
+struct ComplexParam {
+    field1: String,
+    field2: f64,
+}
+
+#[tool(
+    name = "complex_tool",
+    description = "A tool with complex parameters",
+    params(
+        text = "A text parameter",
+        number = "An optional number parameter",
+    )
+)]
+async fn complex_tool(
+    text: String, 
+    number: Option<f64>,
+) -> Result<ToolResponseContent> {
+    // Tool implementation
 }
 ```
 
